@@ -79,6 +79,7 @@ Supported convenience methods:
 Currently supported automatic object-property inference:
 
 - ``LINE.Length``
+- ``LWPOLYLINE.Length`` for straight-segment polylines
 - ``CIRCLE.Radius``
 - ``CIRCLE.Diameter``
 - ``CIRCLE.Circumference``
@@ -106,6 +107,14 @@ Example:
         line,
         "Length",
         dxfattribs={"insert": (0, 0, 0)},
+        register_field_list=True,
+    )
+
+    pline = msp.add_lwpolyline([(0, 0), (3, 4), (3, 8)])
+    msp.add_mtext_acobjprop_field(
+        pline,
+        "Length",
+        dxfattribs={"insert": (0, -10, 0)},
         register_field_list=True,
     )
 

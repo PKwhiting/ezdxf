@@ -49,6 +49,18 @@ def build_doc() -> ezdxf.document.Drawing:
         register_field_list=True,
     )
 
+    polyline_length = msp.add_lwpolyline([(0, 14), (3, 18), (3, 22)])
+    msp.add_mtext(
+        "Polyline Length:",
+        dxfattribs={"insert": (0, 32, 0), "char_height": 2.5, "width": 20},
+    )
+    msp.add_mtext_acobjprop_field(
+        polyline_length,
+        "Length",
+        dxfattribs={"insert": (24, 32, 0), "char_height": 2.5, "width": 30},
+        register_field_list=True,
+    )
+
     circle = msp.add_circle((5, 8), radius=3)
     msp.add_mtext(
         "Circle Area:",
