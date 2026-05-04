@@ -71,6 +71,11 @@ The current experimental field helpers can create object-backed fields hosted by
 :class:`~ezdxf.entities.MText`. These helpers are intended for AutoCAD-oriented
 workflows where preserving the field object graph matters.
 
+Related field-host support also exists for:
+
+- :class:`~ezdxf.entities.Text`
+- :class:`~ezdxf.entities.MultiLeader` with MTEXT content
+
 Supported convenience methods:
 
 - :meth:`~ezdxf.graphicsfactory.CreatorInterface.add_mtext_acvar_field`

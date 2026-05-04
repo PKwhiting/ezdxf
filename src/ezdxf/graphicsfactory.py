@@ -307,6 +307,84 @@ class CreatorInterface:
         dxfattribs.setdefault("insert", Vec3())
         return self.new_entity("TEXT", dxfattribs)  # type: ignore
 
+    def add_text_acvar_field(
+        self,
+        name: str,
+        *,
+        text: str = "",
+        height: Optional[float] = None,
+        rotation: Optional[float] = None,
+        dxfattribs=None,
+        register_field_list: bool = False,
+    ) -> Text:
+        """Add a :class:`~ezdxf.entities.Text` entity containing an
+        object-backed ``AcVar`` field.
+
+        Args:
+            name: AutoCAD variable name, e.g. ``"Author"``
+            text: visible TEXT content, e.g. ``"----"``
+            height: text height in drawing units
+            rotation: text rotation in degrees
+            dxfattribs: additional DXF attributes for the TEXT entity
+            register_field_list: also register the wrapper/child field handles
+                in the root ``ACAD_FIELDLIST`` object
+
+        """
+        text_entity = self.add_text(
+            text or "",
+            height=height,
+            rotation=rotation,
+            dxfattribs=dxfattribs,
+        )
+        text_entity.new_acvar_field(
+            name,
+            text=text or "",
+            register_field_list=register_field_list,
+        )
+        return text_entity
+
+    def add_text_acobjprop_field(
+        self,
+        target: DXFGraphic,
+        property_name: str,
+        *,
+        field_format: str = "%lu2",
+        text: Optional[str] = None,
+        height: Optional[float] = None,
+        rotation: Optional[float] = None,
+        dxfattribs=None,
+        register_field_list: bool = False,
+    ) -> Text:
+        """Add a :class:`~ezdxf.entities.Text` entity containing an
+        object-backed ``AcObjProp`` field.
+
+        Args:
+            target: referenced DXF entity
+            property_name: object property name, e.g. ``"Length"``
+            field_format: field formatting code
+            text: visible TEXT content, if ``None`` use inferred display text
+            height: text height in drawing units
+            rotation: text rotation in degrees
+            dxfattribs: additional DXF attributes for the TEXT entity
+            register_field_list: also register the wrapper/child field handles
+                in the root ``ACAD_FIELDLIST`` object
+
+        """
+        text_entity = self.add_text(
+            text or "",
+            height=height,
+            rotation=rotation,
+            dxfattribs=dxfattribs,
+        )
+        text_entity.new_acobjprop_field(
+            target,
+            property_name,
+            field_format=field_format,
+            text=text,
+            register_field_list=register_field_list,
+        )
+        return text_entity
+
     def add_blockref(self, name: str, insert: UVec, dxfattribs=None) -> Insert:
         """
         Add an :class:`~ezdxf.entities.Insert` entity.

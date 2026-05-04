@@ -23,6 +23,30 @@ combinations of MULTILEADER properties with decent quality, so stick to recipes
 and hints shown in this tutorial to get usable results otherwise, you will enter
 uncharted territory.
 
+Experimental field helpers
+--------------------------
+
+Object-backed field hosting is also available for :class:`~ezdxf.entities.MultiLeader`
+entities with MTEXT content.
+
+The field helpers are entity-level methods on a built MULTILEADER object, e.g.:
+
+.. code-block:: python
+
+    import ezdxf
+    from ezdxf.math import Vec2
+
+    doc = ezdxf.new("R2007")
+    msp = doc.modelspace()
+    builder = msp.add_multileader_mtext("Standard")
+    builder.set_content("TEXT")
+    builder.build(insert=Vec2(0, 0))
+    ml = builder.multileader
+    ml.new_acvar_field("Author", text="----", register_field_list=True)
+
+Only MULTILEADER entities with MTEXT content are supported by this experimental
+field-host API.
+
 The rendering result of the MULTILEADER entity is highly dependent on the CAD
 application. The MULTILEADER entity does not have a pre-rendered anonymous
 block of DXF primitives like all DIMENSION entities, so results may vary

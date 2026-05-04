@@ -37,6 +37,19 @@ def build_doc() -> ezdxf.document.Drawing:
         register_field_list=True,
     )
 
+    msp.add_text(
+        "Author (TEXT):",
+        height=2.5,
+        dxfattribs={"insert": (60, 46, 0)},
+    )
+    msp.add_text_acvar_field(
+        "Author",
+        text="----",
+        height=2.5,
+        dxfattribs={"insert": (88, 46, 0)},
+        register_field_list=True,
+    )
+
     line = msp.add_line((0, 20), (10, 20))
     msp.add_mtext(
         "Line Length:",

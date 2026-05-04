@@ -36,6 +36,45 @@ Add a simple one line text entity by factory function :meth:`~ezdxf.layouts.Base
 
     doc.saveas("simple_text.dxf")
 
+Experimental field helpers
+--------------------------
+
+The current experimental field helpers also support object-backed fields hosted by
+:class:`~ezdxf.entities.Text`.
+
+Supported convenience methods:
+
+- :meth:`~ezdxf.graphicsfactory.CreatorInterface.add_text_acvar_field`
+- :meth:`~ezdxf.graphicsfactory.CreatorInterface.add_text_acobjprop_field`
+
+Example:
+
+.. code-block:: python
+
+    import ezdxf
+
+    doc = ezdxf.new("R2007")
+    msp = doc.modelspace()
+
+    msp.add_text_acvar_field(
+        "Author",
+        text="----",
+        height=2.5,
+        dxfattribs={"insert": (0, 10, 0)},
+        register_field_list=True,
+    )
+
+    line = msp.add_line((0, 0), (10, 0))
+    msp.add_text_acobjprop_field(
+        line,
+        "Length",
+        height=2.5,
+        dxfattribs={"insert": (0, 0, 0)},
+        register_field_list=True,
+    )
+
+These helpers are still considered experimental.
+
 Alignments defined by the enum :class:`~ezdxf.enums.TextEntityAlignment`:
 
 ============   =============== ================= =====
