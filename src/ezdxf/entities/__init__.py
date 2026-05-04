@@ -29,7 +29,7 @@ from .blockrecord import BlockRecord
 
 # register DXF objects R2000
 from .acad_proxy_entity import ACADProxyEntity
-from .dxfobj import XRecord, Placeholder, VBAProject, SortEntsTable
+from .dxfobj import XRecord, Placeholder, VBAProject, SortEntsTable, Field
 from .dictionary import Dictionary, DictionaryVar, DictionaryWithDefault
 from .layout import DXFLayout
 from .idbuffer import IDBuffer

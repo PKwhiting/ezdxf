@@ -25,6 +25,7 @@ to meet the specific needs of different industries and applications.
     :maxdepth: 1
 
     dictionary
+    field
     dxflayout
     dxfobject
     geodata

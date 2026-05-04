@@ -379,13 +379,311 @@ acdb_field = DefSubclass(
 )
 
 
-# todo: implement FIELD
-# register when done
+@register_entity
 class Field(DXFObject):
     """DXF FIELD entity"""
 
     DXFTYPE = "FIELD"
     DXFATTRIBS = DXFAttributes(base_class, acdb_field)
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.tags = Tags()
+
+    def copy_data(self, entity: Self, copy_strategy=default_copy) -> None:
+        assert isinstance(entity, Field)
+        entity.tags = Tags(self.tags)
+
+    @property
+    def evaluator_id(self) -> str:
+        return self.dxf.get("evaluator_id", "")
+
+    @property
+    def field_code(self) -> str:
+        if self.tags:
+            return self._collect_field_code(self.tags)
+        return self.dxf.get("field_code", "") + self.dxf.get(
+            "field_code_overflow", ""
+        )
+
+    @property
+    def is_text_wrapper(self) -> bool:
+        return self.evaluator_id == "_text"
+
+    @property
+    def child_handles(self) -> list[str]:
+        return [tag.value for tag in self.tags if tag.code == 360]
+
+    @property
+    def object_handles(self) -> list[str]:
+        return [tag.value for tag in self.tags if tag.code == 331]
+
+    def get_child_fields(self) -> list[Field]:
+        if self.doc is None:
+            return []
+        result: list[Field] = []
+        for handle in self.child_handles:
+            field = self.doc.entitydb.get(handle)
+            if isinstance(field, Field) and field.is_alive:
+                result.append(field)
+        return result
+
+    def set_text_wrapper(self, child_field: Union[Field, str]) -> None:
+        if isinstance(child_field, Field):
+            child_handle = child_field.dxf.handle
+        else:
+            child_handle = child_field
+        if not child_handle:
+            raise DXFStructureError("linked child FIELD requires a valid handle")
+        self.reset(
+            [
+                (1, "_text"),
+                (2, "%<\\_FldIdx 0>%"),
+                (90, 1),
+                (360, child_handle),
+                (97, 0),
+                (91, 63),
+                (92, 0),
+                (94, 13),
+                (95, 2),
+                (96, 0),
+                (300, ""),
+                (93, 1),
+                (6, "ACFD_FIELDTEXT_CHECKSUM"),
+                (93, 2),
+                (90, 2),
+                (140, 450.0),
+                (94, 0),
+                (300, ""),
+                (302, ""),
+                (304, "ACVALUE_END"),
+                (7, "ACFD_FIELD_VALUE"),
+                (93, 3),
+                (90, 0),
+                (94, 0),
+                (300, ""),
+                (302, ""),
+                (304, "ACVALUE_END"),
+                (301, ""),
+                (98, 0),
+            ]
+        )
+
+    def set_acvar(self, name: str, *, value: str = "", display: str = "") -> None:
+        """Build a simple ``AcVar`` field payload.
+
+        Args:
+            name: AutoCAD variable name, e.g. ``"Author"``
+            value: optional stored field value string
+            display: optional visible display text
+
+        """
+        self.reset(
+            [
+                (1, "AcVar"),
+                (2, f"\\AcVar {name}"),
+                (90, 0),
+                (97, 0),
+                (91, 63),
+                (92, 0),
+                (94, 59),
+                (95, 2),
+                (96, 0),
+                (300, ""),
+                (93, 1),
+                (6, "Variable"),
+                (93, 2),
+                (90, 4),
+                (1, name),
+                (94, 0),
+                (300, ""),
+                (302, ""),
+                (304, "ACVALUE_END"),
+                (7, "ACFD_FIELD_VALUE"),
+                (93, 4),
+                (90, 4),
+                (1, value),
+                (94, 0),
+                (300, ""),
+                (302, ""),
+                (304, "ACVALUE_END"),
+                (301, display),
+                (98, len(display)),
+            ]
+        )
+
+    def set_acobjprop(
+        self,
+        target: Union[DXFEntity, str],
+        property_name: str,
+        *,
+        field_format: str = "%lu2",
+        value: Any = None,
+        display: str = "",
+    ) -> None:
+        """Build a simple ``AcObjProp`` field payload.
+
+        Args:
+            target: referenced DXF entity or handle string
+            property_name: AutoCAD object property name, e.g. ``"Length"``
+            field_format: field formatting code
+            value: optional evaluated property value
+            display: optional visible display text
+
+        """
+        if isinstance(target, str):
+            handle = target
+        else:
+            handle = target.dxf.handle
+        if not handle:
+            raise DXFStructureError("AcObjProp target requires a valid handle")
+
+        field_code = f"\\AcObjProp Object(%<\\_ObjIdx 0>%).{property_name}"
+        if field_format:
+            field_code += f' \\f "{field_format}"'
+
+        tags: list[tuple[int, Any]] = [
+            (1, "AcObjProp"),
+            (2, field_code),
+            (90, 0),
+            (97, 1),
+            (331, handle),
+            (91, 63),
+            (92, 0),
+            (94, 59),
+            (95, 2),
+            (96, 0),
+            (300, ""),
+            (93, 2),
+            (6, "ObjectPropertyId"),
+            (93, 2),
+            (90, 64),
+            (330, handle),
+            (94, 0),
+            (300, ""),
+            (302, ""),
+            (304, "ACVALUE_END"),
+            (6, "ObjectPropertyName"),
+            (93, 2),
+            (90, 4),
+            (1, property_name),
+            (94, 0),
+            (300, ""),
+            (302, ""),
+            (304, "ACVALUE_END"),
+        ]
+
+        if value is not None or display:
+            tags.extend(self._field_value_tags(value, display, field_format))
+
+        self.reset(tags)
+
+    @staticmethod
+    def _field_value_tags(value: Any, display: str, field_format: str) -> list[tuple[int, Any]]:
+        if value is None:
+            dtype = 4
+            value_tag = (1, "")
+        elif isinstance(value, bool):
+            dtype = 1
+            value_tag = (91, int(value))
+        elif isinstance(value, int):
+            dtype = 1
+            value_tag = (91, value)
+        elif isinstance(value, float):
+            dtype = 2
+            value_tag = (140, value)
+        else:
+            dtype = 4
+            value_tag = (1, str(value))
+
+        return [
+            (7, "ACFD_FIELD_VALUE"),
+            (93, 4),
+            (90, dtype),
+            value_tag,
+            (94, 0),
+            (300, field_format),
+            (302, display),
+            (304, "ACVALUE_END"),
+            (301, display),
+            (98, len(display)),
+        ]
+
+    def load_dxf_attribs(
+        self, processor: Optional[SubclassProcessor] = None
+    ) -> DXFNamespace:
+        dxf = super().load_dxf_attribs(processor)
+        self.dxf = dxf
+        if processor:
+            try:
+                tags = processor.subclasses[1]
+            except IndexError:
+                raise DXFStructureError(
+                    f"Missing subclass AcDbField in FIELD(#{dxf.handle})"
+                )
+            self.reset(tags)
+        return dxf
+
+    @staticmethod
+    def _collect_field_code(tags: Tags) -> str:
+        for index, tag in enumerate(tags):
+            if tag.code == 2:
+                parts = [tag.value]
+                index += 1
+                while index < len(tags) and tags[index].code == 3:
+                    parts.append(tags[index].value)
+                    index += 1
+                return "".join(parts)
+        return ""
+
+    def _sync_dxf_attribs(self) -> None:
+        for attrib_name in (
+            "evaluator_id",
+            "field_code",
+            "field_code_overflow",
+            "n_child_fields",
+        ):
+            self.dxf.discard(attrib_name)
+
+        for tag in self.tags:
+            if tag.code == 1 and not self.dxf.hasattr("evaluator_id"):
+                self.dxf.evaluator_id = tag.value
+            elif tag.code == 2 and not self.dxf.hasattr("field_code"):
+                self.dxf.field_code = tag.value
+            elif tag.code == 3 and not self.dxf.hasattr("field_code_overflow"):
+                self.dxf.field_code_overflow = tag.value
+            elif tag.code == 90 and not self.dxf.hasattr("n_child_fields"):
+                self.dxf.n_child_fields = tag.value
+
+    def export_entity(self, tagwriter: AbstractTagWriter) -> None:
+        super().export_entity(tagwriter)
+        tagwriter.write_tag2(SUBCLASS_MARKER, acdb_field.name)
+        if self.tags:
+            tagwriter.write_tags(Tags(totags(self.tags)))
+        else:
+            self.dxf.export_dxf_attribs(
+                tagwriter,
+                [
+                    "evaluator_id",
+                    "field_code",
+                    "field_code_overflow",
+                    "n_child_fields",
+                ],
+            )
+
+    def reset(self, tags: Iterable[Union[DXFTag, tuple[int, Any]]]) -> None:
+        self.tags = Tags(totags(tags))
+        if len(self.tags) and self.tags[0] == (SUBCLASS_MARKER, acdb_field.name):
+            del self.tags[0]
+        self._sync_dxf_attribs()
+
+    def extend(self, tags: Iterable[Union[DXFTag, tuple[int, Any]]]) -> None:
+        self.tags.extend(totags(tags))
+        self._sync_dxf_attribs()
+
+    def clear(self) -> None:
+        self.tags.clear()
+        self._sync_dxf_attribs()
 
 
 def is_dxf_object(entity: DXFEntity) -> TypeGuard[DXFObject]:

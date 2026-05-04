@@ -116,6 +116,7 @@ class ExtensionDict:
             # All data in the extension dictionary belongs only to the owner
             hard_owned=True,
         )
+        xdict._value_code = 360
         return cls(xdict)
 
     def copy(self, copy_strategy=default_copy) -> ExtensionDict:

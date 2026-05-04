@@ -650,6 +650,79 @@ class CreatorInterface:
         mtext.text = str(text)
         return mtext
 
+    def add_mtext_acvar_field(
+        self,
+        name: str,
+        *,
+        text: str = "",
+        dxfattribs=None,
+        register_field_list: bool = False,
+    ) -> MText:
+        """Add an :class:`~ezdxf.entities.MText` entity containing an
+        object-backed ``AcVar`` field.
+
+        Args:
+            name: AutoCAD variable name, e.g. ``"Author"``
+            text: visible MTEXT content, e.g. ``"----"``
+            dxfattribs: additional DXF attributes for the MTEXT entity
+            register_field_list: also register the wrapper/child field handles
+                in the root ``ACAD_FIELDLIST`` object
+
+        """
+        mtext = self.add_mtext(text or "", dxfattribs=dxfattribs)
+        mtext.new_acvar_field(
+            name,
+            text=text or "",
+            register_field_list=register_field_list,
+        )
+        return mtext
+
+    def add_mtext_acobjprop_field(
+        self,
+        target: DXFGraphic,
+        property_name: str,
+        *,
+        field_format: str = "%lu2",
+        text: Optional[str] = None,
+        dxfattribs=None,
+        register_field_list: bool = False,
+    ) -> MText:
+        """Add an :class:`~ezdxf.entities.MText` entity containing an
+        object-backed ``AcObjProp`` field.
+
+        The helper can infer a visible display text for a limited set of object
+        properties. If inference is not available and `text` is ``None``, the
+        created MTEXT keeps an empty text content.
+
+        Args:
+            target: referenced DXF entity
+            property_name: object property name, e.g. ``"Length"``
+            field_format: field formatting code
+            text: visible MTEXT content, if ``None`` use inferred display text
+            dxfattribs: additional DXF attributes for the MTEXT entity
+            register_field_list: also register the wrapper/child field handles
+                in the root ``ACAD_FIELDLIST`` object
+
+        Supported automatic inference at the moment:
+
+        - ``LINE.Length``
+        - ``CIRCLE.Radius``
+        - ``CIRCLE.Diameter``
+        - ``CIRCLE.Circumference``
+        - ``CIRCLE.Area``
+        - ``LWPOLYLINE.Area`` for closed polylines without arc segments
+
+        """
+        mtext = self.add_mtext(text or "", dxfattribs=dxfattribs)
+        mtext.new_acobjprop_field(
+            target,
+            property_name,
+            field_format=field_format,
+            text=text,
+            register_field_list=register_field_list,
+        )
+        return mtext
+
     def add_mtext_static_columns(
         self,
         content: Iterable[str],

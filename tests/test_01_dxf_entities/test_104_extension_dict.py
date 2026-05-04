@@ -60,6 +60,7 @@ def test_line_new_extension_dict(doc):
     dxf_dict = xdict.dictionary
     assert dxf_dict.dxftype() == "DICTIONARY"
     assert dxf_dict.dxf.owner == entity.dxf.handle
+    assert dxf_dict._value_code == 360
     assert (
         entity.has_app_data("{ACAD_XDICTIONARY") is False
     ), "extension dictionary is a separated storage"
@@ -147,6 +148,7 @@ def test_add_new_dictionary_to_xdict(doc):
     xdict = line.new_extension_dict()
     new_dict = xdict.add_dictionary("TEST")
     assert new_dict.dxf.owner == xdict.handle
+    assert xdict.dictionary._value_code == 360
 
 
 if __name__ == '__main__':

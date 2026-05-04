@@ -38,3 +38,17 @@
 	- Bugfix release
 	- Requires Python 3.10, Python 3.9 has reached End of Life in Oktober 2025
 	- Requires PyPy 3.11, latest `Pillow` release does not provide PyPy 3.10 wheels
+- # Release v1.4.4
+	- In development
+	- Experimental support for object-backed `MTEXT` field authoring
+	- First-class support for `FIELD` DXF objects
+	- Initial convenience API for:
+		- drawing-variable fields
+		- object-property fields
+	- Initial inferred object-property support for:
+		- `LINE.Length`
+		- `CIRCLE.Radius`
+		- `CIRCLE.Diameter`
+		- `CIRCLE.Circumference`
+		- `CIRCLE.Area`
+		- closed straight-segment `LWPOLYLINE.Area`

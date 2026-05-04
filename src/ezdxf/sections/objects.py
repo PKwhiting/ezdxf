@@ -31,6 +31,8 @@ if TYPE_CHECKING:
         UnderlayDefinition,
         DictionaryWithDefault,
         XRecord,
+        FieldList,
+        Field,
         Placeholder,
     )
     from ezdxf.entities.image import ImageDefReactor
@@ -312,6 +314,42 @@ class ObjectsSection:
 
         """
         return self.new_entity("XRECORD", dxfattribs={"owner": owner})  # type: ignore
+
+    def add_field(self, owner: str = "0", dxfattribs: Optional[dict] = None) -> Field:
+        """Add a new :class:`~ezdxf.entities.Field` object.
+
+        Args:
+            owner: handle to owner as hex string.
+            dxfattribs: additional DXF attributes.
+
+        """
+        attribs = {"owner": owner}
+        if dxfattribs:
+            attribs.update(dxfattribs)
+        return self.new_entity("FIELD", dxfattribs=attribs)  # type: ignore
+
+    def get_field_list(self) -> Optional[FieldList]:
+        field_list = self.doc.rootdict.get("ACAD_FIELDLIST")
+        if field_list is None:
+            return None
+        from ezdxf.entities.idbuffer import FieldList
+
+        if not isinstance(field_list, FieldList):
+            raise const.DXFStructureError(
+                f"expected a FIELDLIST object, got {str(field_list)} for key: ACAD_FIELDLIST"
+            )
+        return field_list
+
+    def setup_field_list(self) -> FieldList:
+        field_list = self.get_field_list()
+        if field_list is not None:
+            return field_list
+        rootdict = self.doc.rootdict
+        field_list = self.new_entity("FIELDLIST", {"owner": rootdict.dxf.handle})  # type: ignore
+        field_list.dxf.flags = 2
+        field_list.set_reactors([rootdict.dxf.handle])
+        rootdict.add("ACAD_FIELDLIST", field_list)
+        return field_list
 
     def add_placeholder(self, owner: str = "0") -> Placeholder:
         """Add a new :class:`~ezdxf.entities.Placeholder` object.

@@ -64,6 +64,58 @@ can be edited like any Python string:
 The :class:`MText` entity has an alias :attr:`MText.dxf.text` for the
 :attr:`MText.text` attribute for compatibility to the :class:`Text` entity.
 
+Experimental field helpers
+--------------------------
+
+The current experimental field helpers can create object-backed fields hosted by
+:class:`~ezdxf.entities.MText`. These helpers are intended for AutoCAD-oriented
+workflows where preserving the field object graph matters.
+
+Supported convenience methods:
+
+- :meth:`~ezdxf.graphicsfactory.CreatorInterface.add_mtext_acvar_field`
+- :meth:`~ezdxf.graphicsfactory.CreatorInterface.add_mtext_acobjprop_field`
+
+Currently supported automatic object-property inference:
+
+- ``LINE.Length``
+- ``CIRCLE.Radius``
+- ``CIRCLE.Diameter``
+- ``CIRCLE.Circumference``
+- ``CIRCLE.Area``
+- ``LWPOLYLINE.Area`` for closed polylines without arc segments
+
+Example:
+
+.. code-block:: python
+
+    import ezdxf
+
+    doc = ezdxf.new("R2007")
+    msp = doc.modelspace()
+
+    msp.add_mtext_acvar_field(
+        "Author",
+        text="----",
+        dxfattribs={"insert": (0, 10, 0)},
+        register_field_list=True,
+    )
+
+    line = msp.add_line((0, 0), (10, 0))
+    msp.add_mtext_acobjprop_field(
+        line,
+        "Length",
+        dxfattribs={"insert": (0, 0, 0)},
+        register_field_list=True,
+    )
+
+These helpers are still considered experimental. The generated DXF is accepted
+by AutoCAD in the current test matrix, but byte-level parity with UI-authored
+field graphs is still a work in progress.
+
+If a display value can not be inferred automatically and no explicit `text`
+argument is supplied, the existing MTEXT text is preserved.
+
 .. important::
 
     Line endings "\\n" will be replaced by the MTEXT line endings "\\P" at

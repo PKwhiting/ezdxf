@@ -52,7 +52,7 @@ from .copy import default_copy
 if TYPE_CHECKING:
     from ezdxf.audit import Auditor
     from ezdxf.document import Drawing
-    from ezdxf.entities import DXFNamespace, DXFEntity
+    from ezdxf.entities import DXFNamespace, DXFEntity, Dictionary, Field
     from ezdxf.lldxf.tagwriter import AbstractTagWriter
     from ezdxf.entitydb import EntityDB
     from ezdxf import xref
@@ -683,6 +683,273 @@ class MText(DXFGraphic):
     @property
     def has_columns(self) -> bool:
         return self._columns is not None
+
+    def has_field_dict(self) -> bool:
+        if not self.has_extension_dict:
+            return False
+        field_dict = self.get_extension_dict().get("ACAD_FIELD")
+        from .dictionary import Dictionary
+
+        return isinstance(field_dict, Dictionary)
+
+    def get_field_dict(self) -> Dictionary:
+        from .dictionary import Dictionary
+
+        if not self.has_extension_dict:
+            raise AttributeError("MText has no field dictionary.")
+        field_dict = self.get_extension_dict().get("ACAD_FIELD")
+        if field_dict is None:
+            raise AttributeError("MText has no field dictionary.")
+        if not isinstance(field_dict, Dictionary):
+            raise const.DXFStructureError(
+                f"expected a DICTIONARY entity, got {str(field_dict)} for key: ACAD_FIELD"
+            )
+        return field_dict
+
+    def new_field_dict(self) -> Dictionary:
+        if self.has_field_dict():
+            return self.get_field_dict()
+        xdict = self.get_extension_dict() if self.has_extension_dict else self.new_extension_dict()
+        field_dict = xdict.add_dictionary("ACAD_FIELD", hard_owned=True)
+        field_dict._value_code = 360
+        return field_dict
+
+    def get_field(self, key: str = "TEXT") -> Optional[Field]:
+        from .dxfobj import Field
+
+        try:
+            field_dict = self.get_field_dict()
+        except AttributeError:
+            return None
+        field = field_dict.get(key)
+        if field is None:
+            return None
+        if not isinstance(field, Field):
+            raise const.DXFStructureError(
+                f"expected a FIELD entity, got {str(field)} for key: {key}"
+            )
+        return field
+
+    def get_primary_field(self, key: str = "TEXT") -> Optional[Field]:
+        field = self.get_field(key)
+        if field is None:
+            return None
+        child_fields = field.get_child_fields()
+        if field.is_text_wrapper and len(child_fields):
+            return child_fields[0]
+        return field
+
+    def set_linked_field(
+        self,
+        field: Field,
+        key: str = "TEXT",
+        *,
+        text: Optional[str] = None,
+        register_field_list: bool = False,
+    ) -> Field:
+        from .dxfobj import Field
+
+        if not isinstance(field, Field):
+            raise const.DXFTypeError(f"invalid DXF type: {field.dxftype()}")
+        if self.doc is None:
+            raise const.DXFStructureError("valid DXF document required")
+
+        wrapper = self.doc.objects.add_field(owner="0")
+        wrapper.set_text_wrapper(field)
+        self.set_field(wrapper, key=key)
+        field.dxf.owner = wrapper.dxf.handle
+        wrapper.set_reactors([self.get_field_dict().dxf.handle])
+
+        if text is not None:
+            self.text = text
+
+        if register_field_list:
+            field_list = self.doc.objects.setup_field_list()
+            handles = list(field_list.handles)
+            for handle in (wrapper.dxf.handle, field.dxf.handle):
+                if handle and handle not in handles:
+                    handles.append(handle)
+            field_list.handles = handles
+
+        return wrapper
+
+    def new_linked_field(
+        self,
+        key: str = "TEXT",
+        *,
+        dxfattribs=None,
+        text: Optional[str] = None,
+        register_field_list: bool = False,
+    ) -> tuple[Field, Field]:
+        if self.doc is None:
+            raise const.DXFStructureError("valid DXF document required")
+        field = self.doc.objects.add_field(owner="0", dxfattribs=dxfattribs)
+        wrapper = self.set_linked_field(
+            field,
+            key=key,
+            text=text,
+            register_field_list=register_field_list,
+        )
+        return field, wrapper
+
+    def new_acvar_field(
+        self,
+        name: str,
+        key: str = "TEXT",
+        *,
+        text: Optional[str] = None,
+        register_field_list: bool = False,
+    ) -> tuple[Field, Field]:
+        """Create an object-backed ``AcVar`` field hosted by this MTEXT.
+
+        Args:
+            name: AutoCAD variable name, e.g. ``"Author"``
+            key: dictionary entry key in the nested ``ACAD_FIELD`` dictionary
+            text: visible MTEXT display text, e.g. ``"----"``
+            register_field_list: also register the wrapper/child field handles
+                in the root ``ACAD_FIELDLIST`` object
+
+        Returns:
+            Tuple ``(child_field, wrapper_field)``
+
+        """
+        field, wrapper = self.new_linked_field(
+            key=key,
+            dxfattribs={},
+            text=text,
+            register_field_list=register_field_list,
+        )
+        field.set_acvar(name, display=text or "")
+        return field, wrapper
+
+    def new_acobjprop_field(
+        self,
+        target: DXFEntity,
+        property_name: str,
+        key: str = "TEXT",
+        *,
+        field_format: str = "%lu2",
+        value: Any = None,
+        display: Optional[str] = None,
+        text: Optional[str] = None,
+        register_field_list: bool = False,
+    ) -> tuple[Field, Field]:
+        """Create an object-backed ``AcObjProp`` field hosted by this MTEXT.
+
+        The helper can infer a display value for a limited set of object
+        properties. If inference is not available and `text` is ``None``, the
+        existing MTEXT text is preserved.
+
+        Supported automatic inference at the moment:
+
+        - ``LINE.Length``
+        - ``CIRCLE.Radius``
+        - ``CIRCLE.Diameter``
+        - ``CIRCLE.Circumference``
+        - ``CIRCLE.Area``
+        - ``LWPOLYLINE.Area`` for closed polylines without arc segments
+
+        Args:
+            target: referenced DXF entity
+            property_name: AutoCAD object property name, e.g. ``"Length"``
+            key: dictionary entry key in the nested ``ACAD_FIELD`` dictionary
+            field_format: field formatting code
+            value: optional evaluated property value override
+            display: optional display string override
+            text: visible MTEXT text override
+            register_field_list: also register the wrapper/child field handles
+                in the root ``ACAD_FIELDLIST`` object
+
+        Returns:
+            Tuple ``(child_field, wrapper_field)``
+
+        """
+        if value is None:
+            value = self._infer_object_property_value(target, property_name)
+        if display is None and value is not None:
+            display = self._format_object_property_value(value, field_format)
+        if text is None and display is not None:
+            text = display
+
+        field, wrapper = self.new_linked_field(
+            key=key,
+            dxfattribs={},
+            text=text,
+            register_field_list=register_field_list,
+        )
+        field.set_acobjprop(
+            target,
+            property_name,
+            field_format=field_format,
+            value=value,
+            display=display or "",
+        )
+        return field, wrapper
+
+    @staticmethod
+    def _infer_object_property_value(target: DXFEntity, property_name: str) -> Any:
+        name = property_name.lower()
+        if name == "length" and target.dxftype() == "LINE":
+            start = Vec3(target.dxf.start)
+            end = Vec3(target.dxf.end)
+            return (end - start).magnitude
+        if name == "area" and target.dxftype() == "LWPOLYLINE":
+            if target.closed and not target.has_arc:
+                vertices = list(target.vertices())
+                if len(vertices) > 2:
+                    area = 0.0
+                    x_prev, y_prev = vertices[-1]
+                    for x, y in vertices:
+                        area += (x_prev * y) - (x * y_prev)
+                        x_prev, y_prev = x, y
+                    return abs(area) * 0.5
+        if target.dxftype() == "CIRCLE":
+            radius = abs(target.dxf.radius)
+            if name == "radius":
+                return radius
+            if name == "diameter":
+                return radius * 2.0
+            if name == "circumference":
+                return math.tau * radius
+            if name == "area":
+                return math.pi * radius * radius
+        return None
+
+    @staticmethod
+    def _format_object_property_value(value: Any, field_format: str) -> str:
+        if isinstance(value, float) and field_format == "%lu2":
+            return f"{value:.4f}"
+        return str(value)
+
+    def set_field(self, field: Field, key: str = "TEXT") -> Field:
+        from .dxfobj import Field
+        from . import factory
+
+        if not isinstance(field, Field):
+            raise const.DXFTypeError(f"invalid DXF type: {field.dxftype()}")
+        if self.doc is None:
+            raise const.DXFStructureError("valid DXF document required")
+
+        field_dict = self.new_field_dict()
+        existing = field_dict.get(key)
+        if existing is field:
+            return field
+        if existing is not None:
+            field_dict.remove(key)
+
+        if field.doc is None:
+            factory.bind(field, self.doc)
+            self.doc.objects.add_object(field)
+        elif field.doc is not self.doc:
+            raise const.DXFStructureError("field belongs to a different DXF document")
+        field_dict.take_ownership(key, field)
+        return field
+
+    def new_field(self, key: str = "TEXT", dxfattribs=None) -> Field:
+        if self.doc is None:
+            raise const.DXFStructureError("valid DXF document required")
+        field = self.doc.objects.add_field(owner="0", dxfattribs=dxfattribs)
+        return self.set_field(field, key=key)
 
     def copy_data(self, entity: Self, copy_strategy=default_copy) -> None:
         assert isinstance(entity, MText)

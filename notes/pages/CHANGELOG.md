@@ -1,4 +1,21 @@
 ## Version 1.4.4 - dev
+	- NEW: first-class support for `FIELD` DXF objects
+		- `FIELD` objects are loaded/exported as real typed DXF objects instead of unimplemented placeholders
+		- low-level helpers added for field inspection and authoring
+	- NEW: experimental object-backed `MTEXT` field authoring API
+		- `layout.add_mtext_acvar_field()`
+		- `layout.add_mtext_acobjprop_field()`
+		- `MText.new_acvar_field()`
+		- `MText.new_acobjprop_field()`
+		- currently validated by AutoCAD roundtrip experiments for `AcVar` fields and `AcObjProp` fields
+	- NEW: initial automatic `AcObjProp` inference support for common cases
+		- `LINE.Length`
+		- `CIRCLE.Radius`
+		- `CIRCLE.Diameter`
+		- `CIRCLE.Circumference`
+		- `CIRCLE.Area`
+		- closed straight-segment `LWPOLYLINE.Area`
+	- NEW: documentation and examples for the experimental field API
 	- NEW: `ezdxf.entities.textstyle.get_textstyle()` function
 	- CHANGE: replace legacy `pyparsing` names and arguments by PEP8-compliant names
 		- requires `pyparsing >= 3.0.0` released in 2022!

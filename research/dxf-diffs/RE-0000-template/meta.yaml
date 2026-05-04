@@ -1,0 +1,17 @@
+id: RE-0000
+title: Template
+status: planned
+host_entity: TBD
+autocad_version: TBD
+dxf_save_format: TBD
+change_type: TBD
+field_type: TBD
+source_artifacts:
+  baseline_before_dxf: TBD
+  edited_after_dxf: TBD
+  baseline_before_normalized_dxf: TBD
+  edited_after_normalized_dxf: TBD
+target_ezdxf_modules:
+  - TBD
+notes:
+  - Replace every `TBD` value before using this experiment as evidence.
