@@ -343,6 +343,34 @@ class CreatorInterface:
         )
         return text_entity
 
+    def add_text_dwgprops_field(
+        self,
+        name: str,
+        *,
+        text: str = "",
+        field_format: str = "",
+        height: Optional[float] = None,
+        rotation: Optional[float] = None,
+        dxfattribs=None,
+        register_field_list: bool = False,
+    ) -> Text:
+        """Add a :class:`~ezdxf.entities.Text` entity containing an
+        object-backed DWGPROPS-style field.
+        """
+        text_entity = self.add_text(
+            text or "",
+            height=height,
+            rotation=rotation,
+            dxfattribs=dxfattribs,
+        )
+        text_entity.new_dwgprops_field(
+            name,
+            text=text or "",
+            field_format=field_format,
+            register_field_list=register_field_list,
+        )
+        return text_entity
+
     def add_text_acobjprop_field(
         self,
         target: DXFGraphic,
@@ -751,6 +779,27 @@ class CreatorInterface:
         mtext.new_acvar_field(
             name,
             text=text or "",
+            register_field_list=register_field_list,
+        )
+        return mtext
+
+    def add_mtext_dwgprops_field(
+        self,
+        name: str,
+        *,
+        text: str = "",
+        field_format: str = "",
+        dxfattribs=None,
+        register_field_list: bool = False,
+    ) -> MText:
+        """Add an :class:`~ezdxf.entities.MText` entity containing an
+        object-backed DWGPROPS-style field.
+        """
+        mtext = self.add_mtext(text or "", dxfattribs=dxfattribs)
+        mtext.new_dwgprops_field(
+            name,
+            text=text or "",
+            field_format=field_format,
             register_field_list=register_field_list,
         )
         return mtext

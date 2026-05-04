@@ -469,19 +469,24 @@ class Field(DXFObject):
             ]
         )
 
-    def set_acvar(self, name: str, *, value: str = "", display: str = "") -> None:
-        """Build a simple ``AcVar`` field payload.
+    def _set_acvar_payload(
+        self,
+        variable_name: str,
+        *,
+        field_format: str = "",
+        value: str = "",
+        display: str = "",
+    ) -> None:
+        """Build an ``AcVar``-style field payload."""
+        field_code = f"\\AcVar {variable_name}"
+        if field_format:
+            field_code += f' \\f "{field_format}"'
 
-        Args:
-            name: AutoCAD variable name, e.g. ``"Author"``
-            value: optional stored field value string
-            display: optional visible display text
-
-        """
+        value_dtype = 4
         self.reset(
             [
                 (1, "AcVar"),
-                (2, f"\\AcVar {name}"),
+                (2, field_code),
                 (90, 0),
                 (97, 0),
                 (91, 63),
@@ -494,14 +499,14 @@ class Field(DXFObject):
                 (6, "Variable"),
                 (93, 2),
                 (90, 4),
-                (1, name),
+                (1, variable_name),
                 (94, 0),
                 (300, ""),
                 (302, ""),
                 (304, "ACVALUE_END"),
                 (7, "ACFD_FIELD_VALUE"),
                 (93, 4),
-                (90, 4),
+                (90, value_dtype),
                 (1, value),
                 (94, 0),
                 (300, ""),
@@ -510,6 +515,28 @@ class Field(DXFObject):
                 (301, display),
                 (98, len(display)),
             ]
+        )
+
+    def set_acvar(self, name: str, *, value: str = "", display: str = "") -> None:
+        """Build a simple ``AcVar`` field payload."""
+        self._set_acvar_payload(name, value=value, display=display)
+
+    def set_dwgprops(
+        self,
+        name: str,
+        *,
+        field_format: str = "",
+        value: str = "",
+        display: str = "",
+    ) -> None:
+        """Build a drawing-properties field payload using the observed
+        ``AcVar CustomDP.<Name>`` pattern.
+        """
+        self._set_acvar_payload(
+            f"CustomDP.{name}",
+            field_format=field_format,
+            value=value,
+            display=display,
         )
 
     def set_acobjprop(

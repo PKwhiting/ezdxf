@@ -159,6 +159,21 @@ def test_set_acobjprop_builds_object_property_field():
     assert (301, "10.0000") in field.tags
 
 
+def test_set_dwgprops_builds_customdp_field():
+    field = Field()
+    field.set_dwgprops("ProjectCode", display="VALUE-123")
+    assert field.evaluator_id == "AcVar"
+    assert field.field_code == "\\AcVar CustomDP.ProjectCode"
+    assert (1, "CustomDP.ProjectCode") in field.tags
+    assert (301, "VALUE-123") in field.tags
+
+
+def test_set_dwgprops_builds_formatted_title_field():
+    field = Field()
+    field.set_dwgprops("Title", field_format="%tc1", display="VALUE")
+    assert field.field_code == "\\AcVar CustomDP.Title \\f \"%tc1\""
+
+
 def test_clear_tags_clears_simple_attributes():
     entity = Field.from_text(FIELD)
     entity.clear()
@@ -345,6 +360,18 @@ def test_new_acvar_field_creates_object_backed_author_field():
     assert (301, "----") in child.tags
     assert wrapper.is_text_wrapper is True
     assert mtext.get_primary_field() is child
+
+
+def test_new_dwgprops_field_creates_object_backed_custom_property_field():
+    doc = ezdxf.new("R2007")
+    mtext = doc.modelspace().add_mtext("TEXT")
+    child, wrapper = mtext.new_dwgprops_field(
+        "ProjectCode", text="VALUE-123", register_field_list=True
+    )
+    assert child.evaluator_id == "AcVar"
+    assert child.field_code == "\\AcVar CustomDP.ProjectCode"
+    assert mtext.get_primary_field() is child
+    assert wrapper.is_text_wrapper is True
 
 
 def test_new_acobjprop_field_creates_object_backed_length_field():

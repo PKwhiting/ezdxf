@@ -822,6 +822,29 @@ class MText(DXFGraphic):
         field.set_acvar(name, display=text or "")
         return field, wrapper
 
+    def new_dwgprops_field(
+        self,
+        name: str,
+        key: str = "TEXT",
+        *,
+        field_format: str = "",
+        text: Optional[str] = None,
+        register_field_list: bool = False,
+    ) -> tuple[Field, Field]:
+        field, wrapper = self.new_linked_field(
+            key=key,
+            dxfattribs={},
+            text=text,
+            register_field_list=register_field_list,
+        )
+        field.set_dwgprops(
+            name,
+            field_format=field_format,
+            value=text or "",
+            display=text or "",
+        )
+        return field, wrapper
+
     def new_acobjprop_field(
         self,
         target: DXFEntity,

@@ -13,6 +13,7 @@ from __future__ import annotations
 
 from pathlib import Path
 import ezdxf
+from ezdxf.math import Vec2
 
 OUT = Path("~/Desktop/Outbox").expanduser()
 
@@ -37,6 +38,17 @@ def build_doc() -> ezdxf.document.Drawing:
         register_field_list=True,
     )
 
+    msp.add_mtext(
+        "ProjectCode:",
+        dxfattribs={"insert": (0, 40, 0), "char_height": 2.5, "width": 20},
+    )
+    msp.add_mtext_dwgprops_field(
+        "ProjectCode",
+        text="VALUE-123",
+        dxfattribs={"insert": (24, 40, 0), "char_height": 2.5, "width": 30},
+        register_field_list=True,
+    )
+
     msp.add_text(
         "Author (TEXT):",
         height=2.5,
@@ -48,6 +60,33 @@ def build_doc() -> ezdxf.document.Drawing:
         height=2.5,
         dxfattribs={"insert": (88, 46, 0)},
         register_field_list=True,
+    )
+
+    msp.add_text(
+        "ProjectCode (TEXT):",
+        height=2.5,
+        dxfattribs={"insert": (60, 40, 0)},
+    )
+    msp.add_text_dwgprops_field(
+        "ProjectCode",
+        text="VALUE-123",
+        height=2.5,
+        dxfattribs={"insert": (88, 40, 0)},
+        register_field_list=True,
+    )
+
+    ml_builder = msp.add_multileader_mtext("Standard")
+    ml_builder.set_content("TEXT")
+    ml_builder.build(insert=Vec2(88, 36))
+    ml_builder.multileader.new_acvar_field(
+        "Author", text="----", register_field_list=True
+    )
+
+    ml_builder = msp.add_multileader_mtext("Standard")
+    ml_builder.set_content("TEXT")
+    ml_builder.build(insert=Vec2(88, 28))
+    ml_builder.multileader.new_dwgprops_field(
+        "ProjectCode", text="VALUE-123", register_field_list=True
     )
 
     line = msp.add_line((0, 20), (10, 20))

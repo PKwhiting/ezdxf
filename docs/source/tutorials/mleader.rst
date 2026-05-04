@@ -44,6 +44,12 @@ The field helpers are entity-level methods on a built MULTILEADER object, e.g.:
     ml = builder.multileader
     ml.new_acvar_field("Author", text="----", register_field_list=True)
 
+    builder = msp.add_multileader_mtext("Standard")
+    builder.set_content("TEXT")
+    builder.build(insert=Vec2(0, 5))
+    ml2 = builder.multileader
+    ml2.new_dwgprops_field("ProjectCode", text="VALUE-123", register_field_list=True)
+
 Only MULTILEADER entities with MTEXT content are supported by this experimental
 field-host API.
 

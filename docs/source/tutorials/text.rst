@@ -45,6 +45,7 @@ The current experimental field helpers also support object-backed fields hosted 
 Supported convenience methods:
 
 - :meth:`~ezdxf.graphicsfactory.CreatorInterface.add_text_acvar_field`
+- :meth:`~ezdxf.graphicsfactory.CreatorInterface.add_text_dwgprops_field`
 - :meth:`~ezdxf.graphicsfactory.CreatorInterface.add_text_acobjprop_field`
 
 Example:
@@ -61,6 +62,14 @@ Example:
         text="----",
         height=2.5,
         dxfattribs={"insert": (0, 10, 0)},
+        register_field_list=True,
+    )
+
+    msp.add_text_dwgprops_field(
+        "ProjectCode",
+        text="VALUE-123",
+        height=2.5,
+        dxfattribs={"insert": (0, 5, 0)},
         register_field_list=True,
     )
 

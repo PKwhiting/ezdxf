@@ -79,6 +79,7 @@ Related field-host support also exists for:
 Supported convenience methods:
 
 - :meth:`~ezdxf.graphicsfactory.CreatorInterface.add_mtext_acvar_field`
+- :meth:`~ezdxf.graphicsfactory.CreatorInterface.add_mtext_dwgprops_field`
 - :meth:`~ezdxf.graphicsfactory.CreatorInterface.add_mtext_acobjprop_field`
 
 Currently supported automatic object-property inference:
@@ -104,6 +105,13 @@ Example:
         "Author",
         text="----",
         dxfattribs={"insert": (0, 10, 0)},
+        register_field_list=True,
+    )
+
+    msp.add_mtext_dwgprops_field(
+        "ProjectCode",
+        text="VALUE-123",
+        dxfattribs={"insert": (0, 5, 0)},
         register_field_list=True,
     )
 

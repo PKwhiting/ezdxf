@@ -1,0 +1,23 @@
+id: RE-0006
+title: MTEXT DWGPROPS field
+status: analyzed
+host_entity: MTEXT
+autocad_version: AutoCAD 2026
+dxf_save_format: AutoCAD 2018 DXF (ASCII)
+change_type: Manual AutoCAD field insertion
+field_type: DWGPROPS field
+source_artifacts:
+  baseline_before_dxf: research/dxf-diffs/RE-0006-mtext-dwgprops-field/before.dxf
+  edited_after_dxf: research/dxf-diffs/RE-0006-mtext-dwgprops-field/after.dxf
+  baseline_before_normalized_dxf: research/dxf-diffs/RE-0006-mtext-dwgprops-field/before.normalized.dxf
+  edited_after_normalized_dxf: research/dxf-diffs/RE-0006-mtext-dwgprops-field/after.normalized.dxf
+target_ezdxf_modules:
+  - src/ezdxf/entities/dxfobj.py
+  - src/ezdxf/entities/mtext.py
+  - src/ezdxf/entities/text.py
+  - src/ezdxf/entities/mleader.py
+  - src/ezdxf/graphicsfactory.py
+notes:
+  - Baseline contains one MTEXT placeholder with text FIELD_DWGPROPS_BASE.
+  - The inserted Title field displayed VALUE-HERE FOR TESTING in the host MTEXT.
+  - AutoCAD stored the child field as AcVar CustomDP.Title with format %tc1.

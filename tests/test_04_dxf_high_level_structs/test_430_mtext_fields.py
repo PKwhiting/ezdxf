@@ -68,6 +68,24 @@ def test_add_mtext_acobjprop_area_field_for_closed_lwpolyline():
     assert "Area" in primary.field_code
 
 
+def test_add_mtext_dwgprops_field_creates_object_backed_field():
+    doc = ezdxf.new("R2007")
+    msp = doc.modelspace()
+
+    mtext = msp.add_mtext_dwgprops_field(
+        "ProjectCode",
+        text="VALUE-123",
+        dxfattribs={"insert": (0, 0, 0)},
+        register_field_list=True,
+    )
+
+    assert mtext.text == "VALUE-123"
+    primary = mtext.get_primary_field()
+    assert primary is not None
+    assert primary.evaluator_id == "AcVar"
+    assert primary.field_code == "\\AcVar CustomDP.ProjectCode"
+
+
 def test_writing_high_level_field_entities_exports_expected_markers():
     doc = ezdxf.new("R2007")
     msp = doc.modelspace()

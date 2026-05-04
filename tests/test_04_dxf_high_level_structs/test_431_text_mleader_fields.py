@@ -29,6 +29,33 @@ def test_graphicsfactory_add_text_acobjprop_field():
     assert primary.object_handles == [line.dxf.handle]
 
 
+def test_text_new_dwgprops_field_creates_object_backed_field():
+    doc = ezdxf.new("R2007")
+    txt = doc.modelspace().add_text("TEXT")
+    child, wrapper = txt.new_dwgprops_field(
+        "ProjectCode", text="VALUE-123", register_field_list=True
+    )
+
+    assert txt.dxf.text == "VALUE-123"
+    assert txt.get_field() is wrapper
+    assert txt.get_primary_field() is child
+    assert child.evaluator_id == "AcVar"
+    assert child.field_code == "\\AcVar CustomDP.ProjectCode"
+
+
+def test_graphicsfactory_add_text_dwgprops_field():
+    doc = ezdxf.new("R2007")
+    txt = doc.modelspace().add_text_dwgprops_field(
+        "ProjectCode",
+        text="VALUE-123",
+        register_field_list=True,
+    )
+    assert txt.dxf.text == "VALUE-123"
+    primary = txt.get_primary_field()
+    assert primary is not None
+    assert primary.field_code == "\\AcVar CustomDP.ProjectCode"
+
+
 def test_multileader_new_acvar_field_creates_object_backed_field():
     doc = ezdxf.new("R2007")
     msp = doc.modelspace()
@@ -62,3 +89,22 @@ def test_multileader_new_acobjprop_field_creates_object_backed_field():
     assert ml.get_primary_field() is child
     assert child.evaluator_id == "AcObjProp"
     assert child.object_handles == [line.dxf.handle]
+
+
+def test_multileader_new_dwgprops_field_creates_object_backed_field():
+    doc = ezdxf.new("R2007")
+    msp = doc.modelspace()
+    builder = msp.add_multileader_mtext("Standard")
+    builder.set_content("TEXT")
+    builder.build(insert=Vec2(0, 0))
+    ml = builder.multileader
+
+    child, wrapper = ml.new_dwgprops_field(
+        "ProjectCode", text="VALUE-123", register_field_list=True
+    )
+
+    assert ml.get_mtext_content() == "VALUE-123"
+    assert ml.get_field() is wrapper
+    assert ml.get_primary_field() is child
+    assert child.evaluator_id == "AcVar"
+    assert child.field_code == "\\AcVar CustomDP.ProjectCode"
