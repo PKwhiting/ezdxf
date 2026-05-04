@@ -893,6 +893,19 @@ class MText(DXFGraphic):
             start = Vec3(target.dxf.start)
             end = Vec3(target.dxf.end)
             return (end - start).magnitude
+        if name == "length" and target.dxftype() == "LWPOLYLINE":
+            if not target.has_arc:
+                vertices = list(target.vertices())
+                if len(vertices) > 1:
+                    length = 0.0
+                    x_prev, y_prev = vertices[0]
+                    for x, y in vertices[1:]:
+                        length += math.hypot(x - x_prev, y - y_prev)
+                        x_prev, y_prev = x, y
+                    if target.closed:
+                        x0, y0 = vertices[0]
+                        length += math.hypot(x0 - x_prev, y0 - y_prev)
+                    return length
         if name == "area" and target.dxftype() == "LWPOLYLINE":
             if target.closed and not target.has_arc:
                 vertices = list(target.vertices())

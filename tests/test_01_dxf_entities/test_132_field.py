@@ -433,6 +433,28 @@ def test_new_acobjprop_field_supports_closed_lwpolyline_area():
     assert "Area" in child.field_code
 
 
+def test_new_acobjprop_field_supports_open_lwpolyline_length():
+    doc = ezdxf.new("R2007")
+    pline = doc.modelspace().add_lwpolyline([(0, 0), (3, 4), (3, 8)])
+    mtext = doc.modelspace().add_mtext("TEXT")
+    child, _ = mtext.new_acobjprop_field(pline, "Length", register_field_list=True)
+    assert child.evaluator_id == "AcObjProp"
+    assert mtext.text == "9.0000"
+    assert "Length" in child.field_code
+
+
+def test_new_acobjprop_field_supports_closed_lwpolyline_length():
+    doc = ezdxf.new("R2007")
+    pline = doc.modelspace().add_lwpolyline(
+        [(0, 0), (10, 0), (10, 10), (0, 10)], close=True
+    )
+    mtext = doc.modelspace().add_mtext("TEXT")
+    child, _ = mtext.new_acobjprop_field(pline, "Length", register_field_list=True)
+    assert child.evaluator_id == "AcObjProp"
+    assert mtext.text == "40.0000"
+    assert "Length" in child.field_code
+
+
 def test_open_lwpolyline_area_is_not_inferred():
     doc = ezdxf.new("R2007")
     pline = doc.modelspace().add_lwpolyline([(0, 0), (10, 0), (10, 10)])
