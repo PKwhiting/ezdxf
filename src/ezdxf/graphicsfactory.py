@@ -349,6 +349,7 @@ class CreatorInterface:
         *,
         text: str = "",
         field_format: str = "",
+        value: Optional[str] = None,
         height: Optional[float] = None,
         rotation: Optional[float] = None,
         dxfattribs=None,
@@ -367,6 +368,7 @@ class CreatorInterface:
             name,
             text=text or "",
             field_format=field_format,
+            value=value,
             register_field_list=register_field_list,
         )
         return text_entity
@@ -789,6 +791,7 @@ class CreatorInterface:
         *,
         text: str = "",
         field_format: str = "",
+        value: Optional[str] = None,
         dxfattribs=None,
         register_field_list: bool = False,
     ) -> MText:
@@ -800,6 +803,7 @@ class CreatorInterface:
             name,
             text=text or "",
             field_format=field_format,
+            value=value,
             register_field_list=register_field_list,
         )
         return mtext

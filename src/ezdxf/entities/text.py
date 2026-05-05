@@ -343,19 +343,30 @@ class Text(DXFGraphic):
         key: str = "TEXT",
         *,
         field_format: str = "",
+        value: Optional[str] = None,
         text: Optional[str] = None,
         register_field_list: bool = False,
     ) -> tuple[Field, Field]:
+        if value is None:
+            value = text or ""
+        if text is None and value:
+            text = value
         field, wrapper = self.new_linked_field(
             key=key,
             dxfattribs={},
             text=text,
             register_field_list=register_field_list,
         )
+        if self.doc is not None and value is not None:
+            custom_vars = self.doc.header.custom_vars
+            if custom_vars.has_tag(name):
+                custom_vars.replace(name, value)
+            else:
+                custom_vars.append(name, value)
         field.set_dwgprops(
             name,
             field_format=field_format,
-            value=text or "",
+            value=value,
             display=text or "",
         )
         return field, wrapper

@@ -42,6 +42,11 @@ Experimental field helpers
 The current experimental field helpers also support object-backed fields hosted by
 :class:`~ezdxf.entities.Text`.
 
+Because :class:`~ezdxf.entities.AttDef` and :class:`~ezdxf.entities.Attrib`
+inherit from :class:`~ezdxf.entities.Text`, the same entity-level field helpers
+are available there too, e.g. ``attdef.new_dwgprops_field(...)`` or
+``attrib.new_acobjprop_field(...)``.
+
 Supported convenience methods:
 
 - :meth:`~ezdxf.graphicsfactory.CreatorInterface.add_text_acvar_field`

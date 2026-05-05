@@ -54,6 +54,7 @@ def test_graphicsfactory_add_text_dwgprops_field():
     primary = txt.get_primary_field()
     assert primary is not None
     assert primary.field_code == "\\AcVar CustomDP.ProjectCode"
+    assert doc.header.custom_vars.get("ProjectCode") == "VALUE-123"
 
 
 def test_multileader_new_acvar_field_creates_object_backed_field():
@@ -108,3 +109,4 @@ def test_multileader_new_dwgprops_field_creates_object_backed_field():
     assert ml.get_primary_field() is child
     assert child.evaluator_id == "AcVar"
     assert child.field_code == "\\AcVar CustomDP.ProjectCode"
+    assert doc.header.custom_vars.get("ProjectCode") == "VALUE-123"

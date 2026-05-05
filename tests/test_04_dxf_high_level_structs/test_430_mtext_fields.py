@@ -84,6 +84,7 @@ def test_add_mtext_dwgprops_field_creates_object_backed_field():
     assert primary is not None
     assert primary.evaluator_id == "AcVar"
     assert primary.field_code == "\\AcVar CustomDP.ProjectCode"
+    assert doc.header.custom_vars.get("ProjectCode") == "VALUE-123"
 
 
 def test_writing_high_level_field_entities_exports_expected_markers():
