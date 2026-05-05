@@ -1232,8 +1232,14 @@ class MultiLeaderMTextBuilder(MultiLeaderBuilder):
 
         mtext.default_content = style.dxf.default_text_content
         mtext.style_handle = mleader.dxf.text_style_handle
-        mtext.color = mleader.dxf.text_color
+        # AutoCAD stores the embedded MTEXT color as BYLAYER while the outer
+        # MULTILEADER text color keeps its BYBLOCK default.
+        if mleader.dxf.text_color == colors.BY_BLOCK_RAW_VALUE:
+            mtext.color = colors.BY_LAYER_RAW_VALUE
+        else:
+            mtext.color = mleader.dxf.text_color
         mtext.alignment = mleader.dxf.text_attachment_point
+        mtext.use_word_break = 0
 
         # The char height is stored in MLeader Context()!
         # The content dimensions (width, height) are not calculated yet,

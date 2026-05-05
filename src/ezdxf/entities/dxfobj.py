@@ -428,35 +428,56 @@ class Field(DXFObject):
                 result.append(field)
         return result
 
-    def set_text_wrapper(self, child_field: Union[Field, str]) -> None:
+    @staticmethod
+    def _field_text_checksum(text: str) -> float:
+        return float(sum((index + 1) * ord(char) for index, char in enumerate(text)))
+
+    def set_text_wrapper(
+        self,
+        child_field: Union[Field, str],
+        *,
+        text: str = "",
+        wrapper_flags: int = 13,
+        include_checksum: bool = True,
+    ) -> None:
         if isinstance(child_field, Field):
             child_handle = child_field.dxf.handle
         else:
             child_handle = child_field
         if not child_handle:
             raise DXFStructureError("linked child FIELD requires a valid handle")
-        self.reset(
+        checksum = self._field_text_checksum(text)
+        tags = [
+            (1, "_text"),
+            (2, "%<\\_FldIdx 0>%"),
+            (90, 1),
+            (360, child_handle),
+            (97, 0),
+            (91, 63),
+            (92, 0),
+            (94, wrapper_flags),
+            (95, 2),
+            (96, 0),
+            (300, ""),
+        ]
+        if include_checksum:
+            tags.extend(
+                [
+                    (93, 1),
+                    (6, "ACFD_FIELDTEXT_CHECKSUM"),
+                    (93, 2),
+                    (90, 2),
+                    (140, checksum),
+                    (94, 0),
+                    (300, ""),
+                    (302, ""),
+                    (304, "ACVALUE_END"),
+                ]
+            )
+        else:
+            tags.append((93, 0))
+        tags.extend(
             [
-                (1, "_text"),
-                (2, "%<\\_FldIdx 0>%"),
-                (90, 1),
-                (360, child_handle),
-                (97, 0),
-                (91, 63),
-                (92, 0),
-                (94, 13),
-                (95, 2),
-                (96, 0),
-                (300, ""),
-                (93, 1),
-                (6, "ACFD_FIELDTEXT_CHECKSUM"),
-                (93, 2),
-                (90, 2),
-                (140, 450.0),
-                (94, 0),
-                (300, ""),
-                (302, ""),
-                (304, "ACVALUE_END"),
                 (7, "ACFD_FIELD_VALUE"),
                 (93, 3),
                 (90, 0),
@@ -468,6 +489,7 @@ class Field(DXFObject):
                 (98, 0),
             ]
         )
+        self.reset(tags)
 
     def _set_acvar_payload(
         self,
@@ -635,6 +657,28 @@ class Field(DXFObject):
             (301, display),
             (98, len(display)),
         ]
+
+    def normalize_acobjprop_cache(self) -> None:
+        in_field_value = False
+        top_level_flags_done = False
+        for index, tag in enumerate(self.tags):
+            if not top_level_flags_done and tag.code == 94:
+                self.tags[index] = dxftag(94, 27)
+                top_level_flags_done = True
+                continue
+            if tag.code == 7 and tag.value == "ACFD_FIELD_VALUE":
+                in_field_value = True
+                continue
+            if in_field_value:
+                if tag.code == 93:
+                    self.tags[index] = dxftag(93, 0)
+                elif tag.code == 302:
+                    self.tags[index] = dxftag(302, "")
+                elif tag.code == 301:
+                    self.tags[index] = dxftag(301, "")
+                elif tag.code == 98:
+                    break
+        self._sync_dxf_attribs()
 
     def load_dxf_attribs(
         self, processor: Optional[SubclassProcessor] = None

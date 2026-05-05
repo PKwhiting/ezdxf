@@ -2,6 +2,7 @@
 # License: MIT License
 from typing import cast
 import io
+import math
 import ezdxf
 import pytest
 
@@ -135,6 +136,38 @@ def test_set_text_wrapper_builds_minimal_wrapper_tags():
     assert (6, "ACFD_FIELDTEXT_CHECKSUM") in wrapper.tags
     assert (7, "ACFD_FIELD_VALUE") in wrapper.tags
     assert (301, "") in wrapper.tags
+
+
+def test_set_text_wrapper_checksum_matches_visible_text():
+    child = Field.new(handle="ABBA", owner="0", dxfattribs={})
+    wrapper = Field()
+    wrapper.set_text_wrapper(child, text="10.0000")
+    assert (140, 1339.0) in wrapper.tags
+
+
+def test_set_text_wrapper_accepts_custom_wrapper_flags():
+    child = Field.new(handle="ABBA", owner="0", dxfattribs={})
+    wrapper = Field()
+    wrapper.set_text_wrapper(child, wrapper_flags=9)
+    assert (94, 9) in wrapper.tags
+
+
+def test_set_text_wrapper_can_omit_checksum_dataset():
+    child = Field.new(handle="ABBA", owner="0", dxfattribs={})
+    wrapper = Field()
+    wrapper.set_text_wrapper(child, include_checksum=False)
+    assert (6, "ACFD_FIELDTEXT_CHECKSUM") not in wrapper.tags
+    assert (93, 0) in wrapper.tags
+
+
+def test_normalize_acobjprop_cache_matches_manual_multileader_shape():
+    field = Field()
+    field.set_acobjprop("ABBA", "Length", value=10.0, display="10.0000")
+    field.normalize_acobjprop_cache()
+    assert (94, 27) in field.tags
+    assert (93, 0) in field.tags
+    assert (302, "") in field.tags
+    assert (301, "") in field.tags
 
 
 def test_set_acvar_builds_minimal_child_field():
@@ -385,6 +418,7 @@ def test_new_acobjprop_field_creates_object_backed_length_field():
     assert child.object_handles == [line.dxf.handle]
     assert "Length" in child.field_code
     assert mtext.text == "10.0000"
+    assert (140, 1339.0) in wrapper.tags
     assert mtext.get_primary_field() is child
     field_list = doc.objects.get_field_list()
     assert field_list is not None
@@ -448,6 +482,92 @@ def test_new_acobjprop_field_supports_circle_area():
     assert "Area" in child.field_code
 
 
+def test_new_acobjprop_field_supports_arc_radius():
+    doc = ezdxf.new("R2007")
+    arc = doc.modelspace().add_arc((0, 0), radius=5, start_angle=0, end_angle=180)
+    mtext = doc.modelspace().add_mtext("TEXT")
+    child, _ = mtext.new_acobjprop_field(arc, "Radius", register_field_list=True)
+    assert child.evaluator_id == "AcObjProp"
+    assert mtext.text == "5.0000"
+    assert "Radius" in child.field_code
+
+
+def test_new_acobjprop_field_supports_arc_length():
+    doc = ezdxf.new("R2007")
+    arc = doc.modelspace().add_arc((0, 0), radius=5, start_angle=0, end_angle=180)
+    mtext = doc.modelspace().add_mtext("TEXT")
+    child, _ = mtext.new_acobjprop_field(arc, "Length", register_field_list=True)
+    assert child.evaluator_id == "AcObjProp"
+    assert mtext.text == "15.7080"
+    assert "Length" in child.field_code
+
+
+def test_new_acobjprop_field_supports_arc_arc_length_alias():
+    doc = ezdxf.new("R2007")
+    arc = doc.modelspace().add_arc((0, 0), radius=5, start_angle=0, end_angle=180)
+    mtext = doc.modelspace().add_mtext("TEXT")
+    child, _ = mtext.new_acobjprop_field(arc, "ArcLength", register_field_list=True)
+    assert child.evaluator_id == "AcObjProp"
+    assert mtext.text == "15.7080"
+    assert "ArcLength" in child.field_code
+
+
+def test_new_acobjprop_field_supports_arc_area():
+    doc = ezdxf.new("R2007")
+    arc = doc.modelspace().add_arc((0, 0), radius=5, start_angle=0, end_angle=180)
+    mtext = doc.modelspace().add_mtext("TEXT")
+    child, _ = mtext.new_acobjprop_field(arc, "Area", register_field_list=True)
+    assert child.evaluator_id == "AcObjProp"
+    assert mtext.text == "39.2699"
+    assert "Area" in child.field_code
+
+
+def test_new_acobjprop_field_supports_ellipse_major_radius():
+    doc = ezdxf.new("R2007")
+    ellipse = doc.modelspace().add_ellipse((0, 0), major_axis=(5, 0), ratio=0.5)
+    mtext = doc.modelspace().add_mtext("TEXT")
+    child, _ = mtext.new_acobjprop_field(
+        ellipse, "MajorRadius", register_field_list=True
+    )
+    assert child.evaluator_id == "AcObjProp"
+    assert mtext.text == "5.0000"
+    assert "MajorRadius" in child.field_code
+
+
+def test_new_acobjprop_field_supports_ellipse_minor_radius():
+    doc = ezdxf.new("R2007")
+    ellipse = doc.modelspace().add_ellipse((0, 0), major_axis=(5, 0), ratio=0.5)
+    mtext = doc.modelspace().add_mtext("TEXT")
+    child, _ = mtext.new_acobjprop_field(
+        ellipse, "MinorRadius", register_field_list=True
+    )
+    assert child.evaluator_id == "AcObjProp"
+    assert mtext.text == "2.5000"
+    assert "MinorRadius" in child.field_code
+
+
+def test_new_acobjprop_field_supports_full_ellipse_area():
+    doc = ezdxf.new("R2007")
+    ellipse = doc.modelspace().add_ellipse((0, 0), major_axis=(5, 0), ratio=0.5)
+    mtext = doc.modelspace().add_mtext("TEXT")
+    child, _ = mtext.new_acobjprop_field(ellipse, "Area", register_field_list=True)
+    assert child.evaluator_id == "AcObjProp"
+    assert mtext.text == "39.2699"
+    assert "Area" in child.field_code
+
+
+def test_new_acobjprop_field_supports_ellipse_arc_area():
+    doc = ezdxf.new("R2007")
+    ellipse = doc.modelspace().add_ellipse(
+        (0, 0), major_axis=(5, 0), ratio=0.5, start_param=0.0, end_param=math.pi
+    )
+    mtext = doc.modelspace().add_mtext("TEXT")
+    child, _ = mtext.new_acobjprop_field(ellipse, "Area", register_field_list=True)
+    assert child.evaluator_id == "AcObjProp"
+    assert mtext.text == "19.6350"
+    assert "Area" in child.field_code
+
+
 def test_new_acobjprop_field_supports_closed_lwpolyline_area():
     doc = ezdxf.new("R2007")
     pline = doc.modelspace().add_lwpolyline(
@@ -487,5 +607,23 @@ def test_open_lwpolyline_area_is_not_inferred():
     pline = doc.modelspace().add_lwpolyline([(0, 0), (10, 0), (10, 10)])
     mtext = doc.modelspace().add_mtext("TEXT")
     child, _ = mtext.new_acobjprop_field(pline, "Area", register_field_list=True)
+    assert child.evaluator_id == "AcObjProp"
+    assert mtext.text == "TEXT"
+
+
+def test_arc_diameter_is_not_inferred():
+    doc = ezdxf.new("R2007")
+    arc = doc.modelspace().add_arc((0, 0), radius=5, start_angle=0, end_angle=180)
+    mtext = doc.modelspace().add_mtext("TEXT")
+    child, _ = mtext.new_acobjprop_field(arc, "Diameter", register_field_list=True)
+    assert child.evaluator_id == "AcObjProp"
+    assert mtext.text == "TEXT"
+
+
+def test_ellipse_length_is_not_inferred():
+    doc = ezdxf.new("R2007")
+    ellipse = doc.modelspace().add_ellipse((0, 0), major_axis=(5, 0), ratio=0.5)
+    mtext = doc.modelspace().add_mtext("TEXT")
+    child, _ = mtext.new_acobjprop_field(ellipse, "Length", register_field_list=True)
     assert child.evaluator_id == "AcObjProp"
     assert mtext.text == "TEXT"

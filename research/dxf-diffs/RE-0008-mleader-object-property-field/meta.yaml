@@ -1,0 +1,21 @@
+id: RE-0008
+title: MULTILEADER object property field
+status: analyzed
+host_entity: MULTILEADER
+autocad_version: AutoCAD 2026
+dxf_save_format: AutoCAD 2018 DXF (ASCII)
+change_type: Manual AutoCAD field insertion
+field_type: Object property field - line length
+source_artifacts:
+  baseline_before_dxf: experiments/field-mleader-object/generated/after.dxf
+  edited_after_dxf: experiments/field-mleader-object/manual/after-length-field.dxf
+  validation_before_dxf: experiments/field-mleader-object/validate-manual-after-length-field/before.dxf
+  validation_after_dxf: experiments/field-mleader-object/validate-manual-after-length-field/after.dxf
+target_ezdxf_modules:
+  - src/ezdxf/entities/dxfobj.py
+  - src/ezdxf/entities/mleader.py
+  - src/ezdxf/render/mleader.py
+notes:
+  - Baseline contains one LINE and one plain MULTILEADER placeholder with text FIELD_MLEADER_OBJECT_BASE.
+  - Edited file was created manually in AutoCAD by replacing the MULTILEADER placeholder with a line Length field.
+  - Repeated Core Console saves toggle the child AcObjProp cache between normalized and populated forms while preserving the field graph.

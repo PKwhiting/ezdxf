@@ -33,7 +33,17 @@ from ezdxf.lldxf.tags import (
     NotFoundException,
 )
 
-from ezdxf.math import Vec3, Matrix44, OCS, UCS, NULLVEC, Z_AXIS, X_AXIS, UVec
+from ezdxf.math import (
+    Vec3,
+    Matrix44,
+    OCS,
+    UCS,
+    NULLVEC,
+    Z_AXIS,
+    X_AXIS,
+    UVec,
+    arc_angle_span_deg,
+)
 from ezdxf.math.transformtools import transform_extrusion
 from ezdxf.colors import rgb2int, RGB
 from ezdxf.tools.text import (
@@ -754,8 +764,10 @@ class MText(DXFGraphic):
         if self.doc is None:
             raise const.DXFStructureError("valid DXF document required")
 
+        final_text = text if text is not None else self.text
+
         wrapper = self.doc.objects.add_field(owner="0")
-        wrapper.set_text_wrapper(field)
+        wrapper.set_text_wrapper(field, text=final_text)
         self.set_field(wrapper, key=key)
         field.dxf.owner = wrapper.dxf.handle
         wrapper.set_reactors([self.get_field_dict().dxf.handle])
@@ -877,6 +889,13 @@ class MText(DXFGraphic):
         Supported automatic inference at the moment:
 
         - ``LINE.Length``
+        - ``ELLIPSE.MajorRadius``
+        - ``ELLIPSE.MinorRadius``
+        - ``ELLIPSE.Area``
+        - ``ARC.Radius``
+        - ``ARC.Length``
+        - ``ARC.ArcLength``
+        - ``ARC.Area``
         - ``CIRCLE.Radius``
         - ``CIRCLE.Diameter``
         - ``CIRCLE.Circumference``
@@ -950,6 +969,27 @@ class MText(DXFGraphic):
                         area += (x_prev * y) - (x * y_prev)
                         x_prev, y_prev = x, y
                     return abs(area) * 0.5
+        if target.dxftype() == "ARC":
+            radius = abs(target.dxf.radius)
+            angle_span = math.radians(
+                arc_angle_span_deg(target.dxf.start_angle, target.dxf.end_angle)
+            )
+            if name == "radius":
+                return radius
+            if name in ("length", "arclength"):
+                return radius * angle_span
+            if name == "area":
+                return 0.5 * radius * radius * angle_span
+        if target.dxftype() == "ELLIPSE":
+            ellipse = target.construction_tool()
+            major_radius = ellipse.major_axis.magnitude
+            minor_radius = ellipse.minor_axis.magnitude
+            if name == "majorradius":
+                return major_radius
+            if name == "minorradius":
+                return minor_radius
+            if name == "area":
+                return 0.5 * major_radius * minor_radius * ellipse.param_span
         if target.dxftype() == "CIRCLE":
             radius = abs(target.dxf.radius)
             if name == "radius":

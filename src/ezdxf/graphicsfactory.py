@@ -935,6 +935,13 @@ class CreatorInterface:
         Supported automatic inference at the moment:
 
         - ``LINE.Length``
+        - ``ELLIPSE.MajorRadius``
+        - ``ELLIPSE.MinorRadius``
+        - ``ELLIPSE.Area``
+        - ``ARC.Radius``
+        - ``ARC.Length``
+        - ``ARC.ArcLength``
+        - ``ARC.Area``
         - ``CIRCLE.Radius``
         - ``CIRCLE.Diameter``
         - ``CIRCLE.Circumference``

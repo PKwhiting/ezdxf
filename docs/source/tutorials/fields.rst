@@ -53,6 +53,13 @@ The current automatic inference support is intentionally small and explicit.
 Supported inferred object-property cases:
 
 - ``LINE.Length``
+- ``ELLIPSE.MajorRadius``
+- ``ELLIPSE.MinorRadius``
+- ``ELLIPSE.Area``
+- ``ARC.Radius``
+- ``ARC.Length``
+- ``ARC.ArcLength``
+- ``ARC.Area``
 - ``LWPOLYLINE.Length`` for straight-segment polylines
 - ``LWPOLYLINE.Area`` for closed straight-segment polylines
 - ``CIRCLE.Radius``

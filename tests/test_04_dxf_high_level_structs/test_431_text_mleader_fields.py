@@ -90,6 +90,9 @@ def test_multileader_new_acobjprop_field_creates_object_backed_field():
     assert ml.get_primary_field() is child
     assert child.evaluator_id == "AcObjProp"
     assert child.object_handles == [line.dxf.handle]
+    assert (94, 27) in child.tags
+    assert (6, "ACFD_FIELDTEXT_CHECKSUM") not in wrapper.tags
+    assert (94, 9) in wrapper.tags
 
 
 def test_multileader_new_dwgprops_field_creates_object_backed_field():

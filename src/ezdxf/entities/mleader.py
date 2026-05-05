@@ -398,8 +398,15 @@ class MultiLeader(DXFGraphic):
         if not self.has_mtext_content:
             raise const.DXFTypeError("MULTILEADER has no MTEXT content")
 
+        final_text = text if text is not None else self.get_mtext_content()
+
         wrapper = self.doc.objects.add_field(owner="0")
-        wrapper.set_text_wrapper(field)
+        wrapper.set_text_wrapper(
+            field,
+            text=final_text,
+            wrapper_flags=9,
+            include_checksum=False,
+        )
         self.set_field(wrapper, key=key)
         field.dxf.owner = wrapper.dxf.handle
         wrapper.set_reactors([self.get_field_dict().dxf.handle])
@@ -519,6 +526,7 @@ class MultiLeader(DXFGraphic):
             value=value,
             display=display or "",
         )
+        field.normalize_acobjprop_cache()
         return field, wrapper
 
     @property

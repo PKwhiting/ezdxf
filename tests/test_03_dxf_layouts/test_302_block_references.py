@@ -60,6 +60,7 @@ def test_blockref_add_new_attribs(msp):
 
     assert blockref.attribs_follow == 1
     attrib = blockref.get_attrib("TEST")
+    assert attrib.dxf.owner == blockref.dxf.handle
     assert attrib.dxf.text == "text"
 
 

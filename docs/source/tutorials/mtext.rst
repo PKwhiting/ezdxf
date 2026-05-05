@@ -85,6 +85,13 @@ Supported convenience methods:
 Currently supported automatic object-property inference:
 
 - ``LINE.Length``
+- ``ELLIPSE.MajorRadius``
+- ``ELLIPSE.MinorRadius``
+- ``ELLIPSE.Area``
+- ``ARC.Radius``
+- ``ARC.Length``
+- ``ARC.ArcLength``
+- ``ARC.Area``
 - ``LWPOLYLINE.Length`` for straight-segment polylines
 - ``CIRCLE.Radius``
 - ``CIRCLE.Diameter``

@@ -3,6 +3,7 @@
 
 import pytest
 import ezdxf
+from ezdxf import colors
 from ezdxf.math import Vec2
 from ezdxf.render import mleader
 from ezdxf.entities import MultiLeader
@@ -33,6 +34,8 @@ class TestMultiLeaderMTextBuilder:
         builder.build(insert=Vec2(0, 0))
         assert ml.context.mtext is not None
         assert ml.context.mtext.default_content == "line1"
+        assert ml.context.mtext.color == colors.BY_LAYER_RAW_VALUE
+        assert ml.context.mtext.use_word_break == 0
 
     def test_set_acvar_field(self, doc):
         ml = make_multi_leader(doc)

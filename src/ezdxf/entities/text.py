@@ -282,8 +282,10 @@ class Text(DXFGraphic):
         if self.doc is None:
             raise const.DXFStructureError("valid DXF document required")
 
+        final_text = text if text is not None else self.dxf.text
+
         wrapper = self.doc.objects.add_field(owner="0")
-        wrapper.set_text_wrapper(field)
+        wrapper.set_text_wrapper(field, text=final_text)
         self.set_field(wrapper, key=key)
         field.dxf.owner = wrapper.dxf.handle
         wrapper.set_reactors([self.get_field_dict().dxf.handle])

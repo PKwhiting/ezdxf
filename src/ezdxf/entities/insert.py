@@ -421,12 +421,83 @@ class Insert(LinkedEntities):
         dxfattribs["text"] = text
         dxfattribs["insert"] = insert
         attrib = cast("Attrib", self._new_compound_entity("ATTRIB", dxfattribs))
-        self.attribs.append(attrib)
+        self.link_entity(attrib)
 
         # This case is only possible if the INSERT was read from a file without
         # attached ATTRIB entities:
         if self.seqend is None:
             self.new_seqend()
+        return attrib
+
+    def add_attrib_acvar_field(
+        self,
+        tag: str,
+        text: str,
+        insert: UVec = (0, 0),
+        *,
+        field_name: str,
+        dxfattribs=None,
+        register_field_list: bool = False,
+    ) -> Attrib:
+        """Attach an :class:`Attrib` entity containing an object-backed
+        ``AcVar`` field to the block reference.
+        """
+        attrib = self.add_attrib(tag, text, insert, dxfattribs)
+        attrib.new_acvar_field(
+            field_name,
+            text=text,
+            register_field_list=register_field_list,
+        )
+        return attrib
+
+    def add_attrib_dwgprops_field(
+        self,
+        tag: str,
+        text: str,
+        insert: UVec = (0, 0),
+        *,
+        property_name: str,
+        field_format: str = "",
+        value: Optional[str] = None,
+        dxfattribs=None,
+        register_field_list: bool = False,
+    ) -> Attrib:
+        """Attach an :class:`Attrib` entity containing an object-backed
+        DWGPROPS-style field to the block reference.
+        """
+        attrib = self.add_attrib(tag, text, insert, dxfattribs)
+        attrib.new_dwgprops_field(
+            property_name,
+            text=text,
+            value=value,
+            field_format=field_format,
+            register_field_list=register_field_list,
+        )
+        return attrib
+
+    def add_attrib_acobjprop_field(
+        self,
+        tag: str,
+        text: str,
+        insert: UVec = (0, 0),
+        *,
+        target: DXFGraphic,
+        property_name: str,
+        field_format: str = "%lu2",
+        dxfattribs=None,
+        register_field_list: bool = False,
+    ) -> Attrib:
+        """Attach an :class:`Attrib` entity containing an object-backed
+        ``AcObjProp`` field to the block reference.
+        """
+        attrib = self.add_attrib(tag, text, insert, dxfattribs)
+        attrib.new_acobjprop_field(
+            target,
+            property_name,
+            text=text or None,
+            field_format=field_format,
+            register_field_list=register_field_list,
+        )
         return attrib
 
     def delete_attrib(self, tag: str, ignore=False) -> None:
