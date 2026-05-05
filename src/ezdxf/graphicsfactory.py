@@ -935,6 +935,10 @@ class CreatorInterface:
         Supported automatic inference at the moment:
 
         - ``LINE.Length``
+        - ``POLYLINE.Length`` for 3D polylines
+        - ``SPLINE.Area`` for planar splines
+        - ``POLYLINE.Length`` for 2D polylines with straight or circular-arc segments
+        - ``POLYLINE.Area`` for 2D polylines with straight or circular-arc segments
         - ``ELLIPSE.MajorRadius``
         - ``ELLIPSE.MinorRadius``
         - ``ELLIPSE.Area``
@@ -942,6 +946,8 @@ class CreatorInterface:
         - ``ARC.Length``
         - ``ARC.ArcLength``
         - ``ARC.Area``
+        - ``LWPOLYLINE.Length`` for 2D polylines with straight or circular-arc segments
+        - ``LWPOLYLINE.Area`` for 2D polylines with straight or circular-arc segments
         - ``CIRCLE.Radius``
         - ``CIRCLE.Diameter``
         - ``CIRCLE.Circumference``

@@ -522,6 +522,195 @@ def test_new_acobjprop_field_supports_arc_area():
     assert "Area" in child.field_code
 
 
+def test_new_acobjprop_field_supports_open_polyline2d_length():
+    doc = ezdxf.new("R2007")
+    polyline = doc.modelspace().add_polyline2d([(0, 0), (3, 4), (3, 8)])
+    mtext = doc.modelspace().add_mtext("TEXT")
+    child, _ = mtext.new_acobjprop_field(polyline, "Length", register_field_list=True)
+    assert child.evaluator_id == "AcObjProp"
+    assert mtext.text == "9.0000"
+    assert "Length" in child.field_code
+
+
+def test_new_acobjprop_field_supports_open_polyline3d_length():
+    doc = ezdxf.new("R2007")
+    polyline = doc.modelspace().add_polyline3d([(0, 0, 0), (3, 4, 0), (3, 8, 0)])
+    mtext = doc.modelspace().add_mtext("TEXT")
+    child, _ = mtext.new_acobjprop_field(polyline, "Length", register_field_list=True)
+    assert child.evaluator_id == "AcObjProp"
+    assert mtext.text == "9.0000"
+    assert "Length" in child.field_code
+
+
+def test_new_acobjprop_field_supports_open_polyline2d_area():
+    doc = ezdxf.new("R2007")
+    polyline = doc.modelspace().add_polyline2d([(0, 0), (3, 4), (3, 8)])
+    mtext = doc.modelspace().add_mtext("TEXT")
+    child, _ = mtext.new_acobjprop_field(polyline, "Area", register_field_list=True)
+    assert child.evaluator_id == "AcObjProp"
+    assert mtext.text == "6.0000"
+    assert "Area" in child.field_code
+
+
+def test_new_acobjprop_field_supports_bulged_open_polyline2d_length():
+    doc = ezdxf.new("R2007")
+    polyline = doc.modelspace().add_polyline2d(
+        [(0, 0, 1.0), (10, 0, 0.0), (10, 10, 0.0)], format="xyb"
+    )
+    mtext = doc.modelspace().add_mtext("TEXT")
+    child, _ = mtext.new_acobjprop_field(polyline, "Length", register_field_list=True)
+    assert child.evaluator_id == "AcObjProp"
+    assert mtext.text == "25.7080"
+    assert "Length" in child.field_code
+
+
+def test_new_acobjprop_field_supports_bulged_open_polyline2d_area():
+    doc = ezdxf.new("R2007")
+    polyline = doc.modelspace().add_polyline2d(
+        [(0, 0, 1.0), (10, 0, 0.0), (10, 10, 0.0)], format="xyb"
+    )
+    mtext = doc.modelspace().add_mtext("TEXT")
+    child, _ = mtext.new_acobjprop_field(polyline, "Area", register_field_list=True)
+    assert child.evaluator_id == "AcObjProp"
+    assert mtext.text == "89.2699"
+    assert "Area" in child.field_code
+
+
+def test_new_acobjprop_field_supports_open_spline_area():
+    doc = ezdxf.new("R2007")
+    spline = doc.modelspace().add_open_spline([(0, 0), (3, 4), (6, 0), (9, 4)])
+    mtext = doc.modelspace().add_mtext("TEXT")
+    child, _ = mtext.new_acobjprop_field(spline, "Area", register_field_list=True)
+    assert child.evaluator_id == "AcObjProp"
+    assert mtext.text == "4.5000"
+    assert "Area" in child.field_code
+
+
+def test_new_acobjprop_field_supports_closed_spline_area():
+    doc = ezdxf.new("R2007")
+    spline = doc.modelspace().add_spline()
+    spline.set_closed([(0, 0, 0), (3, 4, 0), (6, 0, 0), (3, -4, 0)], degree=3)
+    mtext = doc.modelspace().add_mtext("TEXT")
+    child, _ = mtext.new_acobjprop_field(spline, "Area", register_field_list=True)
+    assert child.evaluator_id == "AcObjProp"
+    assert mtext.text == "16.2667"
+    assert "Area" in child.field_code
+
+
+def test_new_acobjprop_field_supports_closed_polyline2d_length():
+    doc = ezdxf.new("R2007")
+    polyline = doc.modelspace().add_polyline2d(
+        [(0, 0), (10, 0), (10, 10), (0, 10)], close=True
+    )
+    mtext = doc.modelspace().add_mtext("TEXT")
+    child, _ = mtext.new_acobjprop_field(polyline, "Length", register_field_list=True)
+    assert child.evaluator_id == "AcObjProp"
+    assert mtext.text == "40.0000"
+    assert "Length" in child.field_code
+
+
+def test_new_acobjprop_field_supports_closed_polyline2d_area():
+    doc = ezdxf.new("R2007")
+    polyline = doc.modelspace().add_polyline2d(
+        [(0, 0), (10, 0), (10, 10), (0, 10)], close=True
+    )
+    mtext = doc.modelspace().add_mtext("TEXT")
+    child, _ = mtext.new_acobjprop_field(polyline, "Area", register_field_list=True)
+    assert child.evaluator_id == "AcObjProp"
+    assert mtext.text == "100.0000"
+    assert "Area" in child.field_code
+
+
+def test_new_acobjprop_field_supports_closed_polyline3d_length():
+    doc = ezdxf.new("R2007")
+    polyline = doc.modelspace().add_polyline3d(
+        [(0, 0, 0), (10, 0, 0), (10, 10, 0), (0, 10, 0)], close=True
+    )
+    mtext = doc.modelspace().add_mtext("TEXT")
+    child, _ = mtext.new_acobjprop_field(polyline, "Length", register_field_list=True)
+    assert child.evaluator_id == "AcObjProp"
+    assert mtext.text == "40.0000"
+    assert "Length" in child.field_code
+
+
+def test_new_acobjprop_field_supports_simple_hatch_area():
+    doc = ezdxf.new("R2007")
+    hatch = doc.modelspace().add_hatch(color=1)
+    hatch.paths.add_polyline_path([(0, 0), (10, 0), (10, 10), (0, 10)], is_closed=True)
+    mtext = doc.modelspace().add_mtext("TEXT")
+    child, _ = mtext.new_acobjprop_field(hatch, "Area", register_field_list=True)
+    assert child.evaluator_id == "AcObjProp"
+    assert mtext.text == "100.0000"
+    assert "Area" in child.field_code
+
+
+def test_new_acobjprop_field_supports_hatch_area_with_hole():
+    doc = ezdxf.new("R2007")
+    hatch = doc.modelspace().add_hatch(color=1)
+    hatch.paths.add_polyline_path([(0, 0), (10, 0), (10, 10), (0, 10)], is_closed=True)
+    hatch.paths.add_polyline_path([(2, 2), (8, 2), (8, 8), (2, 8)], is_closed=True)
+    mtext = doc.modelspace().add_mtext("TEXT")
+    child, _ = mtext.new_acobjprop_field(hatch, "Area", register_field_list=True)
+    assert child.evaluator_id == "AcObjProp"
+    assert mtext.text == "64.0000"
+    assert "Area" in child.field_code
+
+
+def test_new_acobjprop_field_supports_hatch_edge_rect_area():
+    doc = ezdxf.new("R2007")
+    hatch = doc.modelspace().add_hatch(color=1)
+    edge_path = hatch.paths.add_edge_path()
+    edge_path.add_line((0, 0), (10, 0))
+    edge_path.add_line((10, 0), (10, 10))
+    edge_path.add_line((10, 10), (0, 10))
+    edge_path.add_line((0, 10), (0, 0))
+    mtext = doc.modelspace().add_mtext("TEXT")
+    child, _ = mtext.new_acobjprop_field(hatch, "Area", register_field_list=True)
+    assert child.evaluator_id == "AcObjProp"
+    assert mtext.text == "100.0000"
+    assert "Area" in child.field_code
+
+
+def test_new_acobjprop_field_supports_hatch_edge_arc_area():
+    doc = ezdxf.new("R2007")
+    hatch = doc.modelspace().add_hatch(color=1)
+    edge_path = hatch.paths.add_edge_path()
+    edge_path.add_line((0, 0), (10, 0))
+    edge_path.add_arc((10, 5), radius=5, start_angle=270, end_angle=90, ccw=True)
+    edge_path.add_line((10, 10), (0, 10))
+    edge_path.add_line((0, 10), (0, 0))
+    mtext = doc.modelspace().add_mtext("TEXT")
+    child, _ = mtext.new_acobjprop_field(hatch, "Area", register_field_list=True)
+    assert child.evaluator_id == "AcObjProp"
+    assert mtext.text == "139.2699"
+    assert "Area" in child.field_code
+
+
+def test_new_acobjprop_field_supports_hatch_edge_ellipse_area():
+    doc = ezdxf.new("R2007")
+    hatch = doc.modelspace().add_hatch(color=1)
+    edge_path = hatch.paths.add_edge_path()
+    edge_path.add_ellipse(center=(5, 5), major_axis=(5, 0), ratio=0.5, start_angle=0, end_angle=360)
+    mtext = doc.modelspace().add_mtext("TEXT")
+    child, _ = mtext.new_acobjprop_field(hatch, "Area", register_field_list=True)
+    assert child.evaluator_id == "AcObjProp"
+    assert mtext.text == "39.2699"
+    assert "Area" in child.field_code
+
+
+def test_new_acobjprop_field_supports_hatch_edge_spline_area():
+    doc = ezdxf.new("R2007")
+    hatch = doc.modelspace().add_hatch(color=1)
+    edge_path = hatch.paths.add_edge_path()
+    cps = [(0, 0), (3, 4), (6, 0), (3, -4), (0, 0)]
+    edge_path.add_spline(control_points=cps, knot_values=[0.0, 0.0, 0.0, 0.0, 0.5, 1.0, 1.0, 1.0, 1.0], degree=3)
+    mtext = doc.modelspace().add_mtext("TEXT")
+    child, _ = mtext.new_acobjprop_field(hatch, "Area", register_field_list=True)
+    assert child.evaluator_id == "AcObjProp"
+    assert mtext.text == "14.4000"
+    assert "Area" in child.field_code
+
+
 def test_new_acobjprop_field_supports_ellipse_major_radius():
     doc = ezdxf.new("R2007")
     ellipse = doc.modelspace().add_ellipse((0, 0), major_axis=(5, 0), ratio=0.5)
@@ -590,6 +779,16 @@ def test_new_acobjprop_field_supports_open_lwpolyline_length():
     assert "Length" in child.field_code
 
 
+def test_new_acobjprop_field_supports_open_lwpolyline_area():
+    doc = ezdxf.new("R2007")
+    pline = doc.modelspace().add_lwpolyline([(0, 0), (10, 0), (10, 10)])
+    mtext = doc.modelspace().add_mtext("TEXT")
+    child, _ = mtext.new_acobjprop_field(pline, "Area", register_field_list=True)
+    assert child.evaluator_id == "AcObjProp"
+    assert mtext.text == "50.0000"
+    assert "Area" in child.field_code
+
+
 def test_new_acobjprop_field_supports_closed_lwpolyline_length():
     doc = ezdxf.new("R2007")
     pline = doc.modelspace().add_lwpolyline(
@@ -602,13 +801,30 @@ def test_new_acobjprop_field_supports_closed_lwpolyline_length():
     assert "Length" in child.field_code
 
 
-def test_open_lwpolyline_area_is_not_inferred():
+def test_new_acobjprop_field_supports_bulged_open_lwpolyline_length():
     doc = ezdxf.new("R2007")
-    pline = doc.modelspace().add_lwpolyline([(0, 0), (10, 0), (10, 10)])
+    pline = doc.modelspace().add_lwpolyline(
+        [(0, 0, 0, 0, 1.0), (10, 0, 0, 0, 0.0), (10, 10, 0, 0, 0.0)],
+        format="xyseb",
+    )
+    mtext = doc.modelspace().add_mtext("TEXT")
+    child, _ = mtext.new_acobjprop_field(pline, "Length", register_field_list=True)
+    assert child.evaluator_id == "AcObjProp"
+    assert mtext.text == "25.7080"
+    assert "Length" in child.field_code
+
+
+def test_new_acobjprop_field_supports_bulged_open_lwpolyline_area():
+    doc = ezdxf.new("R2007")
+    pline = doc.modelspace().add_lwpolyline(
+        [(0, 0, 0, 0, 1.0), (10, 0, 0, 0, 0.0), (10, 10, 0, 0, 0.0)],
+        format="xyseb",
+    )
     mtext = doc.modelspace().add_mtext("TEXT")
     child, _ = mtext.new_acobjprop_field(pline, "Area", register_field_list=True)
     assert child.evaluator_id == "AcObjProp"
-    assert mtext.text == "TEXT"
+    assert mtext.text == "89.2699"
+    assert "Area" in child.field_code
 
 
 def test_arc_diameter_is_not_inferred():
@@ -625,5 +841,56 @@ def test_ellipse_length_is_not_inferred():
     ellipse = doc.modelspace().add_ellipse((0, 0), major_axis=(5, 0), ratio=0.5)
     mtext = doc.modelspace().add_mtext("TEXT")
     child, _ = mtext.new_acobjprop_field(ellipse, "Length", register_field_list=True)
+    assert child.evaluator_id == "AcObjProp"
+    assert mtext.text == "TEXT"
+
+
+def test_polyline2d_area_with_bulge_is_inferred():
+    doc = ezdxf.new("R2007")
+    polyline = doc.modelspace().add_polyline2d(
+        [(0, 0, 1.0), (10, 0, 0.0), (10, 10, 0.0)], format="xyb"
+    )
+    mtext = doc.modelspace().add_mtext("TEXT")
+    child, _ = mtext.new_acobjprop_field(polyline, "Area", register_field_list=True)
+    assert child.evaluator_id == "AcObjProp"
+    assert mtext.text == "89.2699"
+
+
+def test_spline_length_is_not_inferred():
+    doc = ezdxf.new("R2007")
+    spline = doc.modelspace().add_open_spline([(0, 0), (3, 4), (6, 0), (9, 4)])
+    mtext = doc.modelspace().add_mtext("TEXT")
+    child, _ = mtext.new_acobjprop_field(spline, "Length", register_field_list=True)
+    assert child.evaluator_id == "AcObjProp"
+    assert mtext.text == "TEXT"
+
+
+def test_open_polyline3d_area_is_not_inferred():
+    doc = ezdxf.new("R2007")
+    polyline = doc.modelspace().add_polyline3d([(0, 0, 0), (3, 4, 0), (3, 8, 0)])
+    mtext = doc.modelspace().add_mtext("TEXT")
+    child, _ = mtext.new_acobjprop_field(polyline, "Area", register_field_list=True)
+    assert child.evaluator_id == "AcObjProp"
+    assert mtext.text == "TEXT"
+
+
+def test_closed_polyline3d_area_is_not_inferred():
+    doc = ezdxf.new("R2007")
+    polyline = doc.modelspace().add_polyline3d(
+        [(0, 0, 0), (10, 0, 0), (10, 10, 0), (0, 10, 0)], close=True
+    )
+    mtext = doc.modelspace().add_mtext("TEXT")
+    child, _ = mtext.new_acobjprop_field(polyline, "Area", register_field_list=True)
+    assert child.evaluator_id == "AcObjProp"
+    assert mtext.text == "TEXT"
+
+
+def test_hatch_area_with_bulged_hole_is_not_inferred():
+    doc = ezdxf.new("R2007")
+    hatch = doc.modelspace().add_hatch(color=1)
+    hatch.paths.add_polyline_path([(0, 0), (10, 0), (10, 10), (0, 10)], is_closed=True)
+    hatch.paths.add_polyline_path([(2, 2, 1.0), (8, 2, 0.0), (8, 8, 0.0)], is_closed=True)
+    mtext = doc.modelspace().add_mtext("TEXT")
+    child, _ = mtext.new_acobjprop_field(hatch, "Area", register_field_list=True)
     assert child.evaluator_id == "AcObjProp"
     assert mtext.text == "TEXT"

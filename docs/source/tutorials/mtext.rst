@@ -85,6 +85,7 @@ Supported convenience methods:
 Currently supported automatic object-property inference:
 
 - ``LINE.Length``
+- ``POLYLINE.Length`` for 3D polylines
 - ``ELLIPSE.MajorRadius``
 - ``ELLIPSE.MinorRadius``
 - ``ELLIPSE.Area``
@@ -92,12 +93,16 @@ Currently supported automatic object-property inference:
 - ``ARC.Length``
 - ``ARC.ArcLength``
 - ``ARC.Area``
-- ``LWPOLYLINE.Length`` for straight-segment polylines
+- ``SPLINE.Area`` for planar splines
+- ``HATCH.Area`` for polyline boundary paths, including simple hole loops, and for single edge paths made of line/arc, ellipse, or spline edges
+- ``POLYLINE.Length`` for 2D polylines with straight or circular-arc segments
+- ``POLYLINE.Area`` for 2D polylines with straight or circular-arc segments
+- ``LWPOLYLINE.Length`` for 2D polylines with straight or circular-arc segments
 - ``CIRCLE.Radius``
 - ``CIRCLE.Diameter``
 - ``CIRCLE.Circumference``
 - ``CIRCLE.Area``
-- ``LWPOLYLINE.Area`` for closed polylines without arc segments
+- ``LWPOLYLINE.Area`` for 2D polylines with straight or circular-arc segments
 
 Example:
 

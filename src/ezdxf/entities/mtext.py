@@ -34,6 +34,7 @@ from ezdxf.lldxf.tags import (
 )
 
 from ezdxf.math import (
+    Vec2,
     Vec3,
     Matrix44,
     OCS,
@@ -43,6 +44,9 @@ from ezdxf.math import (
     X_AXIS,
     UVec,
     arc_angle_span_deg,
+    bulge_radius,
+    is_point_in_polygon_2d,
+    safe_normal_vector,
 )
 from ezdxf.math.transformtools import transform_extrusion
 from ezdxf.colors import rgb2int, RGB
@@ -889,6 +893,10 @@ class MText(DXFGraphic):
         Supported automatic inference at the moment:
 
         - ``LINE.Length``
+        - ``POLYLINE.Length`` for 3D polylines
+        - ``SPLINE.Area`` for planar splines
+        - ``POLYLINE.Length`` for 2D polylines with straight or circular-arc segments
+        - ``POLYLINE.Area`` for 2D polylines with straight or circular-arc segments
         - ``ELLIPSE.MajorRadius``
         - ``ELLIPSE.MinorRadius``
         - ``ELLIPSE.Area``
@@ -900,7 +908,8 @@ class MText(DXFGraphic):
         - ``CIRCLE.Diameter``
         - ``CIRCLE.Circumference``
         - ``CIRCLE.Area``
-        - ``LWPOLYLINE.Area`` for closed polylines without arc segments
+        - ``LWPOLYLINE.Length`` for 2D polylines with straight or circular-arc segments
+        - ``LWPOLYLINE.Area`` for 2D polylines with straight or circular-arc segments
 
         Args:
             target: referenced DXF entity
@@ -946,29 +955,35 @@ class MText(DXFGraphic):
             start = Vec3(target.dxf.start)
             end = Vec3(target.dxf.end)
             return (end - start).magnitude
-        if name == "length" and target.dxftype() == "LWPOLYLINE":
-            if not target.has_arc:
-                vertices = list(target.vertices())
-                if len(vertices) > 1:
-                    length = 0.0
-                    x_prev, y_prev = vertices[0]
-                    for x, y in vertices[1:]:
-                        length += math.hypot(x - x_prev, y - y_prev)
-                        x_prev, y_prev = x, y
-                    if target.closed:
-                        x0, y0 = vertices[0]
-                        length += math.hypot(x0 - x_prev, y0 - y_prev)
-                    return length
-        if name == "area" and target.dxftype() == "LWPOLYLINE":
-            if target.closed and not target.has_arc:
-                vertices = list(target.vertices())
-                if len(vertices) > 2:
-                    area = 0.0
-                    x_prev, y_prev = vertices[-1]
-                    for x, y in vertices:
-                        area += (x_prev * y) - (x * y_prev)
-                        x_prev, y_prev = x, y
-                    return abs(area) * 0.5
+        if target.dxftype() == "POLYLINE" and target.is_3d_polyline and name == "length":
+            vertices = list(target.points_in_wcs())
+            if len(vertices) > 1:
+                length = 0.0
+                previous = vertices[0]
+                for vertex in vertices[1:]:
+                    length += (vertex - previous).magnitude
+                    previous = vertex
+                if target.is_closed:
+                    length += (vertices[0] - previous).magnitude
+                return length
+        if target.dxftype() == "POLYLINE" and target.is_2d_polyline:
+            vertices = [
+                (Vec2(vertex.dxf.location.x, vertex.dxf.location.y), vertex.dxf.get("bulge", 0.0))
+                for vertex in target.vertices
+            ]
+            if name == "length":
+                return MText._polyline2d_length(vertices, closed=target.is_closed)
+            if name == "area":
+                return MText._polyline2d_area(vertices, closed=target.is_closed)
+        if target.dxftype() == "LWPOLYLINE":
+            vertices = [
+                (Vec2(x, y), bulge)
+                for x, y, bulge in target.get_points(format="xyb")
+            ]
+            if name == "length":
+                return MText._polyline2d_length(vertices, closed=target.closed)
+            if name == "area":
+                return MText._polyline2d_area(vertices, closed=target.closed)
         if target.dxftype() == "ARC":
             radius = abs(target.dxf.radius)
             angle_span = math.radians(
@@ -990,6 +1005,65 @@ class MText(DXFGraphic):
                 return minor_radius
             if name == "area":
                 return 0.5 * major_radius * minor_radius * ellipse.param_span
+        if target.dxftype() == "SPLINE" and name == "area":
+            source_points = Vec3.list(target.control_points)
+            if len(source_points) < 3:
+                source_points = Vec3.list(target.fit_points)
+            if len(source_points) > 2:
+                normal = safe_normal_vector(source_points)
+                origin = source_points[0]
+                planar = all(
+                    math.isclose((point - origin).dot(normal), 0.0, abs_tol=1e-9)
+                    for point in source_points[1:]
+                )
+            else:
+                planar = False
+            if planar:
+                points = list(target.construction_tool().approximate(segments=3072))
+                if len(points) > 2:
+                    ocs = OCS(normal)
+                    points_ocs = list(ocs.points_from_wcs(points))
+                    if target.closed:
+                        return MText._polygon_area_xy(points_ocs)
+                    return MText._open_curve_area_against_chord(points_ocs)
+        if target.dxftype() == "HATCH" and name == "area":
+            from .boundary_paths import PolylinePath, EdgePath, LineEdge, ArcEdge, EllipseEdge, SplineEdge
+
+            paths = target.paths.paths
+            if len(paths) == 1:
+                path = paths[0]
+                if isinstance(path, PolylinePath):
+                    return MText._hatch_polyline_path_area(path)
+                if isinstance(path, EdgePath) and all(
+                    isinstance(edge, (LineEdge, ArcEdge, EllipseEdge)) for edge in path.edges
+                ):
+                    return MText._hatch_edge_path_area(path)
+                if isinstance(path, EdgePath) and all(
+                    isinstance(edge, (LineEdge, ArcEdge, EllipseEdge, SplineEdge))
+                    for edge in path.edges
+                ) and any(isinstance(edge, SplineEdge) for edge in path.edges):
+                    from .boundary_paths import flatten_to_polyline_path
+
+                    poly_path = flatten_to_polyline_path(path, distance=0.001, segments=2048)
+                    return MText._hatch_polyline_path_area(poly_path)
+            elif len(paths) > 1 and target.dxf.hatch_style == 0:
+                poly_paths = [path for path in paths if isinstance(path, PolylinePath)]
+                if len(poly_paths) == len(paths) and all(not path.has_bulge() for path in poly_paths):
+                    polygons = [[Vec2(x, y) for x, y, _ in path.vertices] for path in poly_paths]
+                    if all(len(polygon) > 2 for polygon in polygons):
+                        areas = [MText._hatch_polyline_path_area(path) for path in poly_paths]
+                        total = 0.0
+                        for polygon, area in zip(polygons, areas):
+                            if area is None:
+                                return None
+                            sample = polygon[0]
+                            depth = sum(
+                                1
+                                for other in polygons
+                                if other is not polygon and is_point_in_polygon_2d(sample, other) >= 0
+                            )
+                            total += area if depth % 2 == 0 else -area
+                        return abs(total)
         if target.dxftype() == "CIRCLE":
             radius = abs(target.dxf.radius)
             if name == "radius":
@@ -1007,6 +1081,110 @@ class MText(DXFGraphic):
         if isinstance(value, float) and field_format == "%lu2":
             return f"{value:.4f}"
         return str(value)
+
+    @staticmethod
+    def _polygon_area_xy(points: list[Vec3]) -> float:
+        area = 0.0
+        x_prev, y_prev = points[-1].x, points[-1].y
+        for point in points:
+            x, y = point.x, point.y
+            area += (x_prev * y) - (x * y_prev)
+            x_prev, y_prev = x, y
+        return abs(area) * 0.5
+
+    @staticmethod
+    def _open_curve_area_against_chord(points: list[Vec3]) -> float:
+        start = points[0]
+        chord = points[-1] - start
+        if chord.magnitude <= 1e-12:
+            return 0.0
+        x_axis = chord.normalize()
+        y_axis = Vec3(-x_axis.y, x_axis.x, 0.0)
+        area = 0.0
+        x_prev = 0.0
+        y_prev = 0.0
+        for point in points[1:]:
+            vector = point - start
+            x = vector.dot(x_axis)
+            y = vector.dot(y_axis)
+            area += abs((x - x_prev) * (y_prev + y) * 0.5)
+            x_prev = x
+            y_prev = y
+        return area
+
+    @staticmethod
+    def _polyline2d_length(
+        vertices: list[tuple[Vec2, float]], *, closed: bool
+    ) -> Optional[float]:
+        count = len(vertices)
+        if count < 2:
+            return None
+        segment_count = count if closed else count - 1
+        length = 0.0
+        for index in range(segment_count):
+            start, bulge = vertices[index]
+            end, _ = vertices[(index + 1) % count]
+            if bulge:
+                theta = 4.0 * math.atan(bulge)
+                radius = bulge_radius(start, end, bulge)
+                length += abs(radius * theta)
+            else:
+                length += start.distance(end)
+        return length
+
+    @staticmethod
+    def _polyline2d_area(
+        vertices: list[tuple[Vec2, float]], *, closed: bool
+    ) -> Optional[float]:
+        count = len(vertices)
+        if count < 3:
+            return None
+        area = 0.0
+        x_prev, y_prev = vertices[-1][0].x, vertices[-1][0].y
+        for point, _ in vertices:
+            x, y = point.x, point.y
+            area += (x_prev * y) - (x * y_prev)
+            x_prev, y_prev = x, y
+        area *= 0.5
+
+        segment_count = count if closed else count - 1
+        for index in range(segment_count):
+            start, bulge = vertices[index]
+            if not bulge:
+                continue
+            end, _ = vertices[(index + 1) % count]
+            theta = 4.0 * math.atan(bulge)
+            radius = bulge_radius(start, end, bulge)
+            area += 0.5 * radius * radius * (theta - math.sin(theta))
+        return abs(area)
+
+    @staticmethod
+    def _hatch_polyline_path_area(path) -> Optional[float]:
+        vertices = [(Vec2(x, y), bulge) for x, y, bulge in path.vertices]
+        return MText._polyline2d_area(vertices, closed=bool(path.is_closed))
+
+    @staticmethod
+    def _hatch_edge_path_area(path) -> Optional[float]:
+        area = 0.0
+        for edge in path.edges:
+            start = edge.real_start_point
+            end = edge.real_end_point
+            area += (start.x * end.y - end.x * start.y) * 0.5
+            if edge.type == 2:  # ArcEdge
+                theta = math.radians(arc_angle_span_deg(edge.start_angle, edge.end_angle))
+                if not edge.ccw:
+                    theta = -theta
+                area += 0.5 * edge.radius * edge.radius * (theta - math.sin(theta))
+            elif edge.type == 3:  # EllipseEdge
+                theta = edge.end_param - edge.start_param
+                if theta <= 0.0:
+                    theta += math.tau
+                if not edge.ccw:
+                    theta = -theta
+                major_radius = edge.major_axis.magnitude
+                minor_radius = major_radius * edge.ratio
+                area += 0.5 * major_radius * minor_radius * (theta - math.sin(theta))
+        return abs(area)
 
     def set_field(self, field: Field, key: str = "TEXT") -> Field:
         from .dxfobj import Field

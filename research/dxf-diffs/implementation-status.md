@@ -44,6 +44,7 @@ Current convenience API:
 Current inferred object-property support:
 
 - `LINE.Length`
+- 3D `POLYLINE.Length`
 - `ELLIPSE.MajorRadius`
 - `ELLIPSE.MinorRadius`
 - `ELLIPSE.Area`
@@ -51,12 +52,16 @@ Current inferred object-property support:
 - `ARC.Length`
 - `ARC.ArcLength`
 - `ARC.Area`
-- straight-segment `LWPOLYLINE.Length`
+- planar `SPLINE.Area`
+- polyline-boundary `HATCH.Area`, including simple hole loops, and single line/arc/ellipse/spline edge paths
+- 2D `POLYLINE.Length` with straight or circular-arc segments
+- 2D `POLYLINE.Area` with straight or circular-arc segments
+- 2D `LWPOLYLINE.Length` with straight or circular-arc segments
 - `CIRCLE.Radius`
 - `CIRCLE.Diameter`
 - `CIRCLE.Circumference`
 - `CIRCLE.Area`
-- closed straight-segment `LWPOLYLINE.Area`
+- 2D `LWPOLYLINE.Area` with straight or circular-arc segments
 
 ## Confirmed by AutoCAD Roundtrip
 
