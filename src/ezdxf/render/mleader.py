@@ -1276,6 +1276,57 @@ class MultiLeaderMTextBuilder(MultiLeaderBuilder):
         if style:
             self._set_mtext_style(style)
 
+    def set_acvar_field(
+        self,
+        name: str,
+        *,
+        text: str = "",
+        register_field_list: bool = False,
+    ):
+        """Set MTEXT content to an object-backed ``AcVar`` field."""
+        self.set_content(text or "")
+        return self.multileader.new_acvar_field(
+            name,
+            text=text or "",
+            register_field_list=register_field_list,
+        )
+
+    def set_dwgprops_field(
+        self,
+        name: str,
+        *,
+        text: str = "",
+        field_format: str = "",
+        register_field_list: bool = False,
+    ):
+        """Set MTEXT content to an object-backed DWGPROPS-style field."""
+        self.set_content(text or "")
+        return self.multileader.new_dwgprops_field(
+            name,
+            text=text or "",
+            field_format=field_format,
+            register_field_list=register_field_list,
+        )
+
+    def set_acobjprop_field(
+        self,
+        target,
+        property_name: str,
+        *,
+        field_format: str = "%lu2",
+        text: Optional[str] = None,
+        register_field_list: bool = False,
+    ):
+        """Set MTEXT content to an object-backed ``AcObjProp`` field."""
+        self.set_content(text or "")
+        return self.multileader.new_acobjprop_field(
+            target,
+            property_name,
+            field_format=field_format,
+            text=text,
+            register_field_list=register_field_list,
+        )
+
     def _set_mtext_style(self, name: str):
         style = self._doc.styles.get(name)
         if style is not None:

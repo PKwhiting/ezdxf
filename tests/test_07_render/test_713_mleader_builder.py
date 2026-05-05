@@ -34,6 +34,46 @@ class TestMultiLeaderMTextBuilder:
         assert ml.context.mtext is not None
         assert ml.context.mtext.default_content == "line1"
 
+    def test_set_acvar_field(self, doc):
+        ml = make_multi_leader(doc)
+        builder = mleader.MultiLeaderMTextBuilder(ml)
+        child, wrapper = builder.set_acvar_field(
+            "Author", text="----", register_field_list=True
+        )
+        builder.build(insert=Vec2(0, 0))
+        assert ml.context.mtext is not None
+        assert ml.context.mtext.default_content == "----"
+        assert ml.get_field() is wrapper
+        assert ml.get_primary_field() is child
+        assert child.field_code == "\\AcVar Author"
+
+    def test_set_dwgprops_field(self, doc):
+        ml = make_multi_leader(doc)
+        builder = mleader.MultiLeaderMTextBuilder(ml)
+        child, wrapper = builder.set_dwgprops_field(
+            "ProjectCode", text="VALUE-123", register_field_list=True
+        )
+        builder.build(insert=Vec2(0, 0))
+        assert ml.context.mtext is not None
+        assert ml.context.mtext.default_content == "VALUE-123"
+        assert ml.get_field() is wrapper
+        assert ml.get_primary_field() is child
+        assert child.field_code == "\\AcVar CustomDP.ProjectCode"
+
+    def test_set_acobjprop_field(self, doc):
+        line = doc.modelspace().add_line((0, 0), (10, 0))
+        ml = make_multi_leader(doc)
+        builder = mleader.MultiLeaderMTextBuilder(ml)
+        child, wrapper = builder.set_acobjprop_field(
+            line, "Length", register_field_list=True
+        )
+        builder.build(insert=Vec2(0, 0))
+        assert ml.context.mtext is not None
+        assert ml.context.mtext.default_content == "10.0000"
+        assert ml.get_field() is wrapper
+        assert ml.get_primary_field() is child
+        assert "Length" in child.field_code
+
 
 class TestMultiLeaderBlockBuilder:
     """The MultiLeaderBlockBuilder is a construction tool to build the
