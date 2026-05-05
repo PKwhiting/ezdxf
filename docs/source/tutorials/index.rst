@@ -16,6 +16,7 @@ Tutorials
     entity_selection
     blocks
     lwpolyline
+    fields
     text
     mtext
     spline
