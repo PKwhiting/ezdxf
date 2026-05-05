@@ -47,6 +47,12 @@ inherit from :class:`~ezdxf.entities.Text`, the same entity-level field helpers
 are available there too, e.g. ``attdef.new_dwgprops_field(...)`` or
 ``attrib.new_acobjprop_field(...)``.
 
+For title-block style workflows the layout/block convenience methods are:
+
+- :meth:`~ezdxf.graphicsfactory.CreatorInterface.add_attdef_acvar_field`
+- :meth:`~ezdxf.graphicsfactory.CreatorInterface.add_attdef_dwgprops_field`
+- :meth:`~ezdxf.graphicsfactory.CreatorInterface.add_attdef_acobjprop_field`
+
 Supported convenience methods:
 
 - :meth:`~ezdxf.graphicsfactory.CreatorInterface.add_text_acvar_field`

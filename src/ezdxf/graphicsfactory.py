@@ -532,6 +532,104 @@ class CreatorInterface:
             dxfattribs["rotation"] = float(rotation)
         return self.new_entity("ATTDEF", dxfattribs)  # type: ignore
 
+    def add_attdef_acvar_field(
+        self,
+        tag: str,
+        insert: UVec = (0, 0),
+        text: str = "",
+        *,
+        field_name: str,
+        height: Optional[float] = None,
+        rotation: Optional[float] = None,
+        dxfattribs=None,
+        register_field_list: bool = False,
+    ) -> AttDef:
+        """Add an :class:`~ezdxf.entities.AttDef` containing an object-backed
+        ``AcVar`` field.
+        """
+        attdef = self.add_attdef(
+            tag,
+            insert=insert,
+            text=text or "",
+            height=height,
+            rotation=rotation,
+            dxfattribs=dxfattribs,
+        )
+        attdef.new_acvar_field(
+            field_name,
+            text=text or "",
+            register_field_list=register_field_list,
+        )
+        return attdef
+
+    def add_attdef_dwgprops_field(
+        self,
+        tag: str,
+        insert: UVec = (0, 0),
+        text: str = "",
+        *,
+        property_name: str,
+        field_format: str = "",
+        value: Optional[str] = None,
+        height: Optional[float] = None,
+        rotation: Optional[float] = None,
+        dxfattribs=None,
+        register_field_list: bool = False,
+    ) -> AttDef:
+        """Add an :class:`~ezdxf.entities.AttDef` containing an object-backed
+        DWGPROPS-style field.
+        """
+        attdef = self.add_attdef(
+            tag,
+            insert=insert,
+            text=text or "",
+            height=height,
+            rotation=rotation,
+            dxfattribs=dxfattribs,
+        )
+        attdef.new_dwgprops_field(
+            property_name,
+            text=text or "",
+            value=value,
+            field_format=field_format,
+            register_field_list=register_field_list,
+        )
+        return attdef
+
+    def add_attdef_acobjprop_field(
+        self,
+        tag: str,
+        insert: UVec = (0, 0),
+        text: str = "",
+        *,
+        target: DXFGraphic,
+        property_name: str,
+        field_format: str = "%lu2",
+        height: Optional[float] = None,
+        rotation: Optional[float] = None,
+        dxfattribs=None,
+        register_field_list: bool = False,
+    ) -> AttDef:
+        """Add an :class:`~ezdxf.entities.AttDef` containing an object-backed
+        ``AcObjProp`` field.
+        """
+        attdef = self.add_attdef(
+            tag,
+            insert=insert,
+            text=text or "",
+            height=height,
+            rotation=rotation,
+            dxfattribs=dxfattribs,
+        )
+        attdef.new_acobjprop_field(
+            target,
+            property_name,
+            text=text or None,
+            field_format=field_format,
+            register_field_list=register_field_list,
+        )
+        return attdef
+
     def add_polyline2d(
         self,
         points: Iterable[UVec],

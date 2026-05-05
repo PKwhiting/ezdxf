@@ -34,3 +34,53 @@ def test_attrib_new_dwgprops_field_creates_object_backed_field():
     assert attrib.get_primary_field() is child
     assert child.evaluator_id == "AcVar"
     assert child.field_code == "\\AcVar CustomDP.ProjectCode"
+
+
+def test_add_attdef_acvar_field():
+    doc = ezdxf.new("R2007")
+    block = doc.blocks.new("TEST")
+    attdef = block.add_attdef_acvar_field(
+        "TAG1",
+        insert=(0, 0),
+        text="----",
+        field_name="Author",
+        register_field_list=True,
+    )
+    primary = attdef.get_primary_field()
+    assert primary is not None
+    assert primary.evaluator_id == "AcVar"
+    assert primary.field_code == "\\AcVar Author"
+
+
+def test_add_attdef_dwgprops_field():
+    doc = ezdxf.new("R2007")
+    block = doc.blocks.new("TEST")
+    attdef = block.add_attdef_dwgprops_field(
+        "TAG1",
+        insert=(0, 0),
+        text="VALUE-123",
+        property_name="ProjectCode",
+        register_field_list=True,
+    )
+    primary = attdef.get_primary_field()
+    assert primary is not None
+    assert primary.field_code == "\\AcVar CustomDP.ProjectCode"
+    assert doc.header.custom_vars.get("ProjectCode") == "VALUE-123"
+
+
+def test_add_attdef_acobjprop_field():
+    doc = ezdxf.new("R2007")
+    block = doc.blocks.new("TEST")
+    line = doc.modelspace().add_line((0, 0), (10, 0))
+    attdef = block.add_attdef_acobjprop_field(
+        "TAG1",
+        insert=(0, 0),
+        text="",
+        target=line,
+        property_name="Length",
+        register_field_list=True,
+    )
+    primary = attdef.get_primary_field()
+    assert primary is not None
+    assert primary.evaluator_id == "AcObjProp"
+    assert primary.object_handles == [line.dxf.handle]
