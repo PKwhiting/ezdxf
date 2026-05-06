@@ -1,12 +1,13 @@
 # Copyright (c) 2019-2024, Manfred Moitzi
 # License: MIT License
 from __future__ import annotations
-from typing import TYPE_CHECKING, Iterable, Mapping, Optional
+from typing import TYPE_CHECKING, Any, Iterable, Mapping, Optional
 import json
 
 from ezdxf.sections.tables import TABLENAMES
 from ezdxf.lldxf.tags import Tags
 from ezdxf.entities import BoundaryPathType, EdgeType
+from ezdxf.render.arrows import ARROWS
 import numpy as np
 
 if TYPE_CHECKING:
@@ -14,6 +15,7 @@ if TYPE_CHECKING:
     from ezdxf.entities import (
         Insert,
         MText,
+        MultiLeader,
         LWPolyline,
         Polyline,
         Spline,
@@ -318,6 +320,8 @@ class _SourceCodeGenerator:
         self.doc = doc
         self.layout = layout
         self.code = Code()
+        self._deferred_code: list[str] = []
+        self._translated_handles: set[str] = set()
 
     def translate_entity(self, entity: DXFEntity) -> None:
         """Translates one DXF entity into Python source code. The generated
@@ -334,6 +338,9 @@ class _SourceCodeGenerator:
             self.add_source_code_line(f'# unsupported DXF entity "{dxftype}"')
         else:
             entity_translator(entity)
+            if dxftype not in TABLENAMES:
+                self._register_entity_handle(entity)
+                self._schedule_hosted_fields(entity)
 
     def translate_entities(
         self,
@@ -350,10 +357,16 @@ class _SourceCodeGenerator:
 
         """
         ignore = set(ignore) if ignore else set()
+        entities = list(entities)
+        self._translated_handles = self._collect_translated_handles(entities)
+        self.add_source_code_line("_entity_map = {}")
 
         for entity in entities:
             if entity.dxftype() not in ignore:
                 self.translate_entity(entity)
+        if self._deferred_code:
+            self.add_source_code_line("# recreate hosted FIELD objects")
+            self.add_source_code_lines(self._deferred_code)
 
     def add_used_resources(self, dxfattribs: Mapping) -> None:
         """Register used resources like layers, line types, text styles and
@@ -381,6 +394,13 @@ class _SourceCodeGenerator:
     def add_source_code_lines(self, code: Iterable[str]) -> None:
         assert not isinstance(code, str)
         self.code.add_lines(code)
+
+    def add_deferred_source_code_line(self, code: str) -> None:
+        self._deferred_code.append(code)
+
+    def add_deferred_source_code_lines(self, code: Iterable[str]) -> None:
+        assert not isinstance(code, str)
+        self._deferred_code.extend(code)
 
     def add_list_source_code(
         self,
@@ -413,6 +433,401 @@ class _SourceCodeGenerator:
         self.add_source_code_line(fmt_str.format(prolog))
         self.add_source_code_lines(_fmt_dxf_tags(tags, indent=4 + indent))
         self.add_source_code_line(fmt_str.format(epilog))
+
+    @staticmethod
+    def _collect_translated_handles(entities: Iterable[DXFEntity]) -> set[str]:
+        handles: set[str] = set()
+        for entity in entities:
+            handle = entity.dxf.get("handle")
+            if handle:
+                handles.add(handle)
+            for attrib in getattr(entity, "attribs", []):
+                attrib_handle = attrib.dxf.get("handle")
+                if attrib_handle:
+                    handles.add(attrib_handle)
+        return handles
+
+    def _register_entity_handle(self, entity: DXFEntity, var_name: str = "e") -> None:
+        handle = entity.dxf.get("handle")
+        if handle:
+            self.add_source_code_line(
+                f'_entity_map[{json.dumps(handle)}] = {var_name}'
+            )
+
+    @staticmethod
+    def _get_host_field_text(entity: DXFEntity) -> str:
+        if entity.dxftype() == "MTEXT":
+            return entity.text
+        if entity.dxftype() == "MULTILEADER" and entity.context.mtext is not None:
+            return entity.context.mtext.default_content
+        return entity.dxf.get("text", "")
+
+    @staticmethod
+    def _read_field_value(field, marker_code: int, marker_value: str) -> Any:
+        tags = list(field.tags)
+        for index, tag in enumerate(tags):
+            if tag.code != marker_code or tag.value != marker_value:
+                continue
+            for value_tag in tags[index + 1 :]:
+                if value_tag.code in (1, 91, 140, 330):
+                    return value_tag.value
+                if value_tag.code == 304 and value_tag.value == "ACVALUE_END":
+                    break
+        return None
+
+    def _dwgprops_name(self, field) -> Optional[str]:
+        if field.evaluator_id != "AcVar":
+            return None
+        variable_name = self._read_field_value(field, 6, "Variable")
+        if isinstance(variable_name, str) and variable_name.startswith("CustomDP."):
+            return variable_name[len("CustomDP.") :]
+        return None
+
+    def _uses_field_list(self, wrapper, child) -> bool:
+        doc = wrapper.doc
+        if doc is None:
+            return False
+        field_list = doc.objects.get_field_list()
+        if field_list is None:
+            return False
+        handles = set(field_list.handles)
+        return (
+            wrapper.dxf.handle in handles
+            or child.dxf.handle in handles
+        )
+
+    def _format_field_tag_value(self, code: int, value: Any) -> Optional[str]:
+        if code in (330, 331):
+            if not isinstance(value, str) or value not in self._translated_handles:
+                return None
+            return f'_entity_map[{json.dumps(value)}].dxf.handle'
+        if isinstance(value, str):
+            return json.dumps(value)
+        return str(value)
+
+    def _field_reset_source(self, field) -> Optional[list[str]]:
+        if len(field.child_handles):
+            return None
+        lines: list[str] = []
+        for code, value in field.tags:
+            value_str = self._format_field_tag_value(code, value)
+            if value_str is None:
+                return None
+            lines.append(f"    ({code}, {value_str}),")
+        return lines
+
+    def _format_python_value(self, value: Any) -> str:
+        if isinstance(value, str):
+            return json.dumps(value)
+        if isinstance(value, (list, tuple)):
+            items = ", ".join(self._format_python_value(item) for item in value)
+            opener, closer = ("[", "]") if isinstance(value, list) else ("(", ")")
+            if len(value) == 1 and isinstance(value, tuple):
+                items += ","
+            return f"{opener}{items}{closer}"
+        if type(value).__name__ == "Vec3":
+            self.add_import_statement("from ezdxf.math import Vec3")
+            return repr(value)
+        return repr(value)
+
+    @staticmethod
+    def _named_object_resource_name(entity, collection_name: str, handle: str) -> Optional[str]:
+        doc = entity.doc
+        if doc is None:
+            return None
+        collection = getattr(doc, collection_name, None)
+        if collection is None:
+            return None
+        for name, resource in collection:
+            if resource.dxf.handle == handle:
+                return name
+        return None
+
+    @staticmethod
+    def _resource_name_by_handle(entity, handle: Optional[str]) -> Optional[str]:
+        if not handle:
+            return None
+        doc = entity.doc
+        if doc is None:
+            return None
+        resource = doc.entitydb.get(handle)
+        if resource is None:
+            return None
+        return resource.dxf.get("name")
+
+    @staticmethod
+    def _block_name_by_handle(entity, handle: Optional[str]) -> Optional[str]:
+        return _SourceCodeGenerator._resource_name_by_handle(entity, handle)
+
+    def _block_record_handle_expr(self, block_name: str) -> str:
+        arrow_name = ARROWS.arrow_name(block_name)
+        if arrow_name in ARROWS:
+            self.add_import_statement("from ezdxf.render.arrows import ARROWS")
+            return f"ARROWS.arrow_handle({self.doc}.blocks, {json.dumps(arrow_name)})"
+        self.code.blocks.add(block_name)
+        return f"{self.doc}.blocks.get({json.dumps(block_name)}).block_record_handle"
+
+    def _set_block_record_handle_if_exists(
+        self, owner: str, attrib_name: str, block_name: str
+    ) -> None:
+        arrow_name = ARROWS.arrow_name(block_name)
+        if arrow_name in ARROWS:
+            self.add_source_code_line(
+                f"{owner}.dxf.{attrib_name} = {self._block_record_handle_expr(block_name)}"
+            )
+            return
+        self.code.blocks.add(block_name)
+        self.add_source_code_line(
+            f'if {json.dumps(block_name)} in {self.doc}.blocks:'
+        )
+        self.add_source_code_line(
+            f'    {owner}.dxf.{attrib_name} = {self.doc}.blocks.get({json.dumps(block_name)}).block_record_handle'
+        )
+        self.add_source_code_line("else:")
+        self.add_source_code_line(f'    {owner}.dxf.discard({json.dumps(attrib_name)})')
+
+    def _set_multileader_resource_handles(
+        self,
+        entity,
+        *,
+        style_name: str,
+        leader_linetype_name: str,
+        text_style_name: str,
+        mtext_style_name: Optional[str] = None,
+    ) -> None:
+        self.add_source_code_line(
+            f'e.dxf.style_handle = {self.doc}.mleader_styles.get({json.dumps(style_name)}).dxf.handle'
+        )
+        self.add_source_code_line(
+            f'e.dxf.leader_linetype_handle = {self.doc}.linetypes.get({json.dumps(leader_linetype_name)}).dxf.handle'
+        )
+        self.add_source_code_line(
+            f'e.dxf.text_style_handle = {self.doc}.styles.get({json.dumps(text_style_name)}).dxf.handle'
+        )
+        if mtext_style_name is not None:
+            self.add_source_code_line(
+                f'mtext.style_handle = {self.doc}.styles.get({json.dumps(mtext_style_name)}).dxf.handle'
+            )
+
+    def _setup_multileader_style(self, entity, style_name: str) -> None:
+        doc = entity.doc
+        if doc is None:
+            return
+        style = doc.mleader_styles.get(style_name)
+        if style is None:
+            return
+
+        dxfattribs = _purge_handles(style.dxfattribs())
+        dxfattribs.pop("name", None)
+        for name in (
+            "leader_linetype_handle",
+            "arrow_head_handle",
+            "text_style_handle",
+            "block_record_handle",
+        ):
+            dxfattribs.pop(name, None)
+        style_text_style_name = self._resource_name_by_handle(
+            entity, style.dxf.get("text_style_handle")
+        )
+        style_linetype_name = self._resource_name_by_handle(
+            entity, style.dxf.get("leader_linetype_handle")
+        )
+        style_arrow_block_name = self._block_name_by_handle(
+            entity, style.dxf.get("arrow_head_handle")
+        )
+        style_block_record_name = self._block_name_by_handle(
+            entity, style.dxf.get("block_record_handle")
+        )
+
+        if style_name == "Standard":
+            self.add_source_code_line(
+                f'mlstyle = {self.doc}.mleader_styles.get({json.dumps(style_name)})'
+            )
+        else:
+            self.add_source_code_line(
+                f'if {json.dumps(style_name)} in {self.doc}.mleader_styles:'
+            )
+            self.add_source_code_line(
+                f'    mlstyle = {self.doc}.mleader_styles.get({json.dumps(style_name)})'
+            )
+            self.add_source_code_line("else:")
+            self.add_source_code_line(
+                f'    mlstyle = {self.doc}.mleader_styles.duplicate_entry("Standard", {json.dumps(style_name)})'
+            )
+
+        for name, value in dxfattribs.items():
+            self.add_source_code_line(
+                f"mlstyle.dxf.{name} = {self._format_python_value(value)}"
+            )
+
+        if style_text_style_name is not None:
+            self.code.styles.add(style_text_style_name)
+            self.add_source_code_line(
+                f'mlstyle.dxf.text_style_handle = {self.doc}.styles.get({json.dumps(style_text_style_name)}).dxf.handle'
+            )
+        if style_linetype_name is not None:
+            self.code.linetypes.add(style_linetype_name)
+            self.add_source_code_line(
+                f'mlstyle.dxf.leader_linetype_handle = {self.doc}.linetypes.get({json.dumps(style_linetype_name)}).dxf.handle'
+            )
+        if style_arrow_block_name is not None:
+            self.add_source_code_line(
+                f"mlstyle.dxf.arrow_head_handle = {self._block_record_handle_expr(style_arrow_block_name)}"
+            )
+        else:
+            self.add_source_code_line('mlstyle.dxf.discard("arrow_head_handle")')
+        if style_block_record_name is not None:
+            self._set_block_record_handle_if_exists(
+                "mlstyle", "block_record_handle", style_block_record_name
+            )
+        else:
+            self.add_source_code_line('mlstyle.dxf.discard("block_record_handle")')
+
+    def _multileader_supported(self, entity: "MultiLeader") -> tuple[bool, dict[str, Any]]:
+        context = entity.context
+        doc = entity.doc
+        if doc is None:
+            return False, {}
+        has_mtext_content = entity.has_mtext_content and context.mtext is not None
+        has_block_content = context.block is not None
+        if not has_mtext_content and not has_block_content:
+            return False, {}
+        style_name = self._named_object_resource_name(
+            entity, "mleader_styles", entity.dxf.style_handle
+        )
+        leader_linetype_name = self._resource_name_by_handle(
+            entity, entity.dxf.leader_linetype_handle
+        )
+        text_style_name = self._resource_name_by_handle(
+            entity, entity.dxf.text_style_handle
+        )
+        style = doc.mleader_styles.get(style_name) if style_name is not None else None
+        if style is None:
+            return False, {}
+        style_arrow_handle = style.dxf.get("arrow_head_handle")
+        style_block_handle = style.dxf.get("block_record_handle")
+        if style_arrow_handle is not None and self._block_name_by_handle(entity, style_arrow_handle) is None:
+            return False, {}
+        if style_block_handle is not None and self._block_name_by_handle(entity, style_block_handle) is None:
+            return False, {}
+        entity_arrow_block_name = self._block_name_by_handle(
+            entity, entity.dxf.get("arrow_head_handle")
+        )
+        if entity.dxf.get("arrow_head_handle") is not None and entity_arrow_block_name is None:
+            return False, {}
+        multi_arrow_block_names: list[tuple[int, str]] = []
+        for arrow_head in entity.arrow_heads:
+            block_name = self._block_name_by_handle(entity, arrow_head.handle)
+            if block_name is None:
+                return False, {}
+            multi_arrow_block_names.append((arrow_head.index, block_name))
+        if not all((style_name, leader_linetype_name, text_style_name)):
+            return False, {}
+
+        resources: dict[str, Any] = {
+            "style_name": style_name,
+            "leader_linetype_name": leader_linetype_name,
+            "text_style_name": text_style_name,
+            "entity_arrow_block_name": entity_arrow_block_name,
+            "multi_arrow_block_names": multi_arrow_block_names,
+        }
+        if has_mtext_content:
+            mtext_style_name = self._resource_name_by_handle(
+                entity, context.mtext.style_handle
+            )
+            if not mtext_style_name:
+                return False, {}
+            resources["content_type"] = "mtext"
+            resources["mtext_style_name"] = mtext_style_name
+            return True, resources
+
+        block_name = self._block_name_by_handle(
+            entity, entity.dxf.get("block_record_handle")
+        )
+        context_block_name = self._block_name_by_handle(
+            entity, context.block.block_record_handle
+        )
+        if not block_name or not context_block_name:
+            return False, {}
+        resources["content_type"] = "block"
+        resources["block_name"] = block_name
+        resources["context_block_name"] = context_block_name
+        return True, resources
+
+    def _schedule_hosted_fields(self, entity: DXFEntity) -> None:
+        has_field_dict = getattr(entity, "has_field_dict", None)
+        get_field_dict = getattr(entity, "get_field_dict", None)
+        if not callable(has_field_dict) or not callable(get_field_dict):
+            return
+        if not has_field_dict():
+            return
+        handle = entity.dxf.get("handle")
+        if not handle:
+            self.add_deferred_source_code_line(
+                f'# unsupported hosted FIELD on {entity.dxftype()}: missing handle'
+            )
+            return
+        host_text = self._get_host_field_text(entity)
+        for key, wrapper in get_field_dict().items():
+            if getattr(wrapper, "dxftype", lambda: "")() != "FIELD":
+                self.add_deferred_source_code_line(
+                    f'# unsupported hosted FIELD on {entity.dxftype()} key {json.dumps(key)}'
+                )
+                continue
+            child_fields = wrapper.get_child_fields() if wrapper.is_text_wrapper else []
+            if not wrapper.is_text_wrapper or len(child_fields) != 1:
+                self.add_deferred_source_code_line(
+                    f'# unsupported hosted FIELD on {entity.dxftype()} key {json.dumps(key)}'
+                )
+                continue
+            child = child_fields[0]
+            field_reset_source = self._field_reset_source(child)
+            if field_reset_source is None:
+                self.add_deferred_source_code_line(
+                    f'# unsupported hosted FIELD on {entity.dxftype()} key {json.dumps(key)}'
+                )
+                continue
+            self.add_deferred_source_code_line(
+                f'_host = _entity_map[{json.dumps(handle)}]'
+            )
+            self.add_deferred_source_code_line(
+                "_child, _wrapper = _host.new_linked_field("
+            )
+            self.add_deferred_source_code_line(
+                f"    key={json.dumps(key)},"
+            )
+            self.add_deferred_source_code_line(
+                f"    text={json.dumps(host_text)},"
+            )
+            self.add_deferred_source_code_line(
+                f"    register_field_list={self._uses_field_list(wrapper, child)},"
+            )
+            self.add_deferred_source_code_line(")")
+            dwgprops_name = self._dwgprops_name(child)
+            if dwgprops_name is not None:
+                dwgprops_value = self._read_field_value(
+                    child, 7, "ACFD_FIELD_VALUE"
+                )
+                if dwgprops_value is None:
+                    dwgprops_value = ""
+                elif not isinstance(dwgprops_value, str):
+                    dwgprops_value = str(dwgprops_value)
+                self.add_deferred_source_code_line(
+                    "_custom_vars = _host.doc.header.custom_vars"
+                )
+                self.add_deferred_source_code_line(
+                    f"if _custom_vars.has_tag({json.dumps(dwgprops_name)}):"
+                )
+                self.add_deferred_source_code_line(
+                    f"    _custom_vars.replace({json.dumps(dwgprops_name)}, {json.dumps(dwgprops_value)})"
+                )
+                self.add_deferred_source_code_line("else:")
+                self.add_deferred_source_code_line(
+                    f"    _custom_vars.append({json.dumps(dwgprops_name)}, {json.dumps(dwgprops_value)})"
+                )
+            self.add_deferred_source_code_line("_child.reset([")
+            self.add_deferred_source_code_lines(field_reset_source)
+            self.add_deferred_source_code_line("])")
 
     def generic_api_call(
         self, dxftype: str, dxfattribs: dict, prefix: str = "e = "
@@ -596,6 +1011,8 @@ class _SourceCodeGenerator:
                     )
                 )
                 self.add_source_code_line("e.attribs.append(a)")
+                self._register_entity_handle(attrib, var_name="a")
+                self._schedule_hosted_fields(attrib)
 
     def _mtext(self, entity: MText) -> None:
         self.add_source_code_lines(
@@ -604,6 +1021,174 @@ class _SourceCodeGenerator:
         # MTEXT content 'text' is not a single DXF tag and therefore not a DXF
         # attribute
         self.add_source_code_line("e.text = {}".format(json.dumps(entity.text)))
+
+    def _multileader(self, entity: "MultiLeader") -> None:
+        supported, resources = self._multileader_supported(entity)
+        if not supported:
+            self.add_source_code_line('# unsupported DXF entity "MULTILEADER"')
+            return
+
+        self.add_import_statement(
+            "from ezdxf.entities.mleader import ArrowHeadData, AttribData, BlockData, LeaderData, LeaderLine, MTextData"
+        )
+        dxfattribs = entity.dxfattribs()
+        for key in (
+            "style_handle",
+            "leader_linetype_handle",
+            "text_style_handle",
+            "arrow_head_handle",
+            "block_record_handle",
+        ):
+            dxfattribs.pop(key, None)
+        self.add_used_resources(dxfattribs)
+        self.code.linetypes.add(resources["leader_linetype_name"])
+        self.code.styles.add(resources["text_style_name"])
+        if resources["content_type"] == "mtext":
+            self.code.styles.add(resources["mtext_style_name"])
+        else:
+            self.code.blocks.add(resources["block_name"])
+            self.code.blocks.add(resources["context_block_name"])
+        self._setup_multileader_style(entity, resources["style_name"])
+        self.add_source_code_lines(self.generic_api_call("MULTILEADER", dxfattribs))
+        self.add_source_code_line("ctx = e.context")
+        for name in (
+            "scale",
+            "base_point",
+            "char_height",
+            "arrow_head_size",
+            "landing_gap_size",
+            "left_attachment",
+            "right_attachment",
+            "text_align_type",
+            "attachment_type",
+            "plane_origin",
+            "plane_x_axis",
+            "plane_y_axis",
+            "plane_normal_reversed",
+            "top_attachment",
+            "bottom_attachment",
+        ):
+            self.add_source_code_line(
+                f"ctx.{name} = {self._format_python_value(getattr(entity.context, name))}"
+            )
+        if resources["content_type"] == "mtext":
+            self.add_source_code_line("mtext = MTextData()")
+            for name in (
+                "default_content",
+                "extrusion",
+                "insert",
+                "text_direction",
+                "rotation",
+                "width",
+                "defined_height",
+                "line_spacing_factor",
+                "line_spacing_style",
+                "color",
+                "alignment",
+                "flow_direction",
+                "bg_color",
+                "bg_scale_factor",
+                "bg_transparency",
+                "use_window_bg_color",
+                "has_bg_fill",
+                "column_type",
+                "use_auto_height",
+                "column_width",
+                "column_gutter_width",
+                "column_flow_reversed",
+                "column_sizes",
+                "use_word_break",
+            ):
+                self.add_source_code_line(
+                    f"mtext.{name} = {self._format_python_value(getattr(entity.context.mtext, name))}"
+                )
+            self._set_multileader_resource_handles(
+                entity,
+                style_name=resources["style_name"],
+                leader_linetype_name=resources["leader_linetype_name"],
+                text_style_name=resources["text_style_name"],
+                mtext_style_name=resources["mtext_style_name"],
+            )
+            self.add_source_code_line("ctx.mtext = mtext")
+            self.add_source_code_line("ctx.block = None")
+        else:
+            self.add_source_code_line(
+                f'_block = {self.doc}.blocks.get({json.dumps(resources["block_name"])})'
+            )
+            self.add_source_code_line(
+                f'_ctx_block = {self.doc}.blocks.get({json.dumps(resources["context_block_name"])})'
+            )
+            self.add_source_code_line("block = BlockData()")
+            for name in (
+                "extrusion",
+                "insert",
+                "scale",
+                "rotation",
+                "color",
+            ):
+                self.add_source_code_line(
+                    f"block.{name} = {self._format_python_value(getattr(entity.context.block, name))}"
+                )
+            self.add_source_code_line(
+                f"block._matrix = {self._format_python_value(entity.context.block._matrix)}"
+            )
+            self._set_multileader_resource_handles(
+                entity,
+                style_name=resources["style_name"],
+                leader_linetype_name=resources["leader_linetype_name"],
+                text_style_name=resources["text_style_name"],
+            )
+            self.add_source_code_line("e.dxf.block_record_handle = _block.block_record_handle")
+            self.add_source_code_line("block.block_record_handle = _ctx_block.block_record_handle")
+            self.add_source_code_line("ctx.block = block")
+            self.add_source_code_line("ctx.mtext = None")
+            self.add_source_code_line("e.block_attribs = []")
+            self.add_source_code_line("_block_attdefs = list(_block.attdefs())")
+            for attrib in entity.block_attribs:
+                self.add_source_code_line(
+                    "e.block_attribs.append(AttribData("
+                    f"handle=_block_attdefs[{attrib.index}].dxf.handle, "
+                    f"index={attrib.index}, width={attrib.width}, text={json.dumps(attrib.text)}"
+                    "))"
+                )
+        if resources["entity_arrow_block_name"] is not None:
+            self.add_source_code_line(
+                f"e.dxf.arrow_head_handle = {self._block_record_handle_expr(resources['entity_arrow_block_name'])}"
+            )
+        if resources["multi_arrow_block_names"]:
+            self.add_source_code_line("e.arrow_heads = []")
+            for index, block_name in resources["multi_arrow_block_names"]:
+                self.add_source_code_line(
+                    "e.arrow_heads.append(ArrowHeadData("
+                    f"{index}, {self._block_record_handle_expr(block_name)}"
+                    "))"
+                )
+        self.add_source_code_line("ctx.leaders.clear()")
+        for leader in entity.context.leaders:
+            self.add_source_code_line("leader = LeaderData()")
+            for name in (
+                "has_last_leader_line",
+                "has_dogleg_vector",
+                "last_leader_point",
+                "dogleg_vector",
+                "dogleg_length",
+                "index",
+                "attachment_direction",
+                "breaks",
+            ):
+                self.add_source_code_line(
+                    f"leader.{name} = {self._format_python_value(getattr(leader, name))}"
+                )
+            self.add_source_code_line("leader.lines.clear()")
+            for line in leader.lines:
+                self.add_source_code_line("line = LeaderLine()")
+                for name in ("vertices", "breaks", "index", "color"):
+                    self.add_source_code_line(
+                        f"line.{name} = {self._format_python_value(getattr(line, name))}"
+                    )
+                self.add_source_code_line("leader.lines.append(line)")
+            self.add_source_code_line("ctx.leaders.append(leader)")
+        self.add_source_code_line("e.update_proxy_graphic()")
 
     def _lwpolyline(self, entity: LWPolyline) -> None:
         self.add_source_code_lines(

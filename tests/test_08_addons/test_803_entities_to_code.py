@@ -19,7 +19,7 @@ import ezdxf.entities
 from ezdxf.lldxf.types import dxftag
 from ezdxf.lldxf.tags import Tags  # required by exec() or eval()
 from ezdxf.entities.ltype import LinetypePattern  # required by exec() or eval()
-from ezdxf.math import Vec3
+from ezdxf.math import Vec2, Vec3
 
 doc = ezdxf.new("R2010")
 msp = doc.modelspace()
@@ -82,9 +82,26 @@ def test_fmt_dxf_tags():
 
 
 def translate_to_code_and_execute(entity):
-    code = str(entities_to_code([entity], layout="msp"))
-    exec(code, globals())
+    code = entities_to_code([entity], layout="msp")
+    exec(code.import_str() + "\n" + str(code), globals())
     return msp[-1]
+
+
+def translate_entities_to_new_layout(entities):
+    target_doc = ezdxf.new("R2010")
+    return execute_entities_code_in_doc(entities, target_doc)
+
+
+def execute_entities_code_in_doc(entities, target_doc):
+    target_msp = target_doc.modelspace()
+    namespace = {"ezdxf": ezdxf, "doc": target_doc, "msp": target_msp}
+    code = entities_to_code(entities, layout="msp")
+    execute_code_in_namespace(code, namespace)
+    return target_doc, target_msp
+
+
+def execute_code_in_namespace(code, namespace):
+    exec(code.import_str() + "\n" + str(code), namespace)
 
 
 def test_line_to_code():
@@ -468,6 +485,304 @@ def test_hatch_to_code():
     assert isinstance(new_hatch, Hatch)
     assert new_hatch.has_pattern_fill
     assert len(new_hatch.pattern.lines) == len(hatch.pattern.lines)
+
+
+def test_text_field_to_code():
+    source_doc = ezdxf.new("R2010")
+    source_msp = source_doc.modelspace()
+    text = source_msp.add_text("----")
+    child, _ = text.new_acvar_field(
+        "Author", text="----", register_field_list=True
+    )
+
+    new_doc, new_msp = translate_entities_to_new_layout([text])
+    new_text = new_msp[-1]
+    new_child = new_text.get_primary_field("TEXT")
+
+    assert new_text.dxf.text == text.dxf.text
+    assert new_child.field_code == child.field_code
+    assert new_doc.objects.get_field_list() is not None
+
+
+def test_mtext_object_property_field_to_code():
+    source_doc = ezdxf.new("R2010")
+    source_msp = source_doc.modelspace()
+    line = source_msp.add_line((0, 0), (2, 0))
+    mtext = source_msp.add_mtext("0")
+    child, _ = mtext.new_acobjprop_field(
+        line, "Length", register_field_list=True
+    )
+
+    _, new_msp = translate_entities_to_new_layout([line, mtext])
+    new_line = new_msp[0]
+    new_mtext = new_msp[1]
+    new_child = new_mtext.get_primary_field("TEXT")
+
+    assert new_child.field_code == child.field_code
+    assert new_child.object_handles == [new_line.dxf.handle]
+
+
+def test_insert_attrib_field_to_code():
+    source_doc = ezdxf.new("R2010")
+    source_msp = source_doc.modelspace()
+    insert = source_msp.add_blockref("TEST", (0, 0))
+    attrib = insert.add_attrib("TAG", "VALUE", (0, 0))
+    child, _ = attrib.new_dwgprops_field(
+        "ProjectCode",
+        value="VALUE-123",
+        text="VALUE-123",
+        register_field_list=True,
+    )
+
+    new_doc, new_msp = translate_entities_to_new_layout([insert])
+    new_insert = next(entity for entity in new_msp if entity.dxftype() == "INSERT")
+    new_attrib = new_insert.attribs[0]
+    new_child = new_attrib.get_primary_field("TEXT")
+
+    assert new_child.field_code == child.field_code
+    assert new_doc.header.custom_vars.get("ProjectCode") == "VALUE-123"
+
+
+def test_multileader_mtext_to_code():
+    from ezdxf.render.mleader import ConnectionSide, TextAlignment
+
+    source_doc = ezdxf.new("R2010")
+    source_msp = source_doc.modelspace()
+    builder = source_msp.add_multileader_mtext()
+    builder.set_content(
+        "note", color=3, char_height=2.5, alignment=TextAlignment.right
+    )
+    builder.set_connection_properties(landing_gap=2.0, dogleg_length=4.0)
+    builder.set_overall_scaling(1.25)
+    builder.add_leader_line(ConnectionSide.left, [Vec2(-5, 0), Vec2(-2, 0)])
+    builder.build(insert=Vec2(0, 0))
+
+    _, new_msp = translate_entities_to_new_layout(source_msp)
+    new_ml = new_msp[-1]
+
+    assert new_ml.dxftype() == "MULTILEADER"
+    assert new_ml.context.mtext is not None
+    assert new_ml.context.mtext.default_content == "note"
+    assert new_ml.context.mtext.alignment == 3
+    assert new_ml.context.char_height == builder.multileader.context.char_height
+    assert len(new_ml.context.leaders) == 1
+    assert len(new_ml.context.leaders[0].lines) == 1
+    assert cmp_vertices(
+        new_ml.context.leaders[0].lines[0].vertices,
+        builder.multileader.context.leaders[0].lines[0].vertices,
+    ) is True
+    assert len(list(new_ml.virtual_entities())) == len(
+        list(builder.multileader.virtual_entities())
+    )
+
+
+def test_multileader_field_to_code():
+    from ezdxf.render.mleader import ConnectionSide
+
+    source_doc = ezdxf.new("R2010")
+    source_msp = source_doc.modelspace()
+    builder = source_msp.add_multileader_mtext()
+    child, _ = builder.set_acvar_field(
+        "Author", text="----", register_field_list=True
+    )
+    builder.add_leader_line(ConnectionSide.left, [Vec2(-5, 0), Vec2(-2, 0)])
+    builder.build(insert=Vec2(0, 0))
+
+    new_doc, new_msp = translate_entities_to_new_layout(source_msp)
+    new_ml = new_msp[-1]
+    new_child = new_ml.get_primary_field("TEXT")
+
+    assert new_ml.context.mtext is not None
+    assert new_ml.context.mtext.default_content == "----"
+    assert new_child is not None
+    assert new_child.field_code == child.field_code
+    assert new_doc.objects.get_field_list() is not None
+
+
+def test_multileader_custom_style_to_code():
+    from ezdxf.render.mleader import ConnectionSide
+
+    source_doc = ezdxf.new("R2010")
+    style = source_doc.mleader_styles.duplicate_entry("Standard", "MY_STYLE")
+    style.dxf.default_text_content = "STYLE_TEXT"
+    style.dxf.char_height = 3.5
+    style.dxf.text_alignment_type = 1
+    source_msp = source_doc.modelspace()
+    builder = source_msp.add_multileader_mtext("MY_STYLE")
+    builder.set_content("note")
+    builder.add_leader_line(ConnectionSide.left, [Vec2(-5, 0), Vec2(-2, 0)])
+    builder.build(insert=Vec2(0, 0))
+
+    new_doc, new_msp = translate_entities_to_new_layout(source_msp)
+    new_ml = new_msp[-1]
+    new_style = new_doc.mleader_styles.get("MY_STYLE")
+
+    assert new_style is not None
+    assert new_style.dxf.default_text_content == "STYLE_TEXT"
+    assert new_style.dxf.char_height == 3.5
+    assert new_style.dxf.text_alignment_type == 1
+    assert new_ml.dxf.style_handle == new_style.dxf.handle
+
+
+def test_multileader_custom_style_arrow_to_code():
+    from ezdxf.render.mleader import ConnectionSide
+
+    source_doc = ezdxf.new("R2010")
+    style = source_doc.mleader_styles.duplicate_entry("Standard", "ARROW_STYLE")
+    style.set_arrow_head("DOT")
+    source_msp = source_doc.modelspace()
+    builder = source_msp.add_multileader_mtext("ARROW_STYLE")
+    builder.set_content("note")
+    builder.add_leader_line(ConnectionSide.left, [Vec2(-5, 0), Vec2(-2, 0)])
+    builder.build(insert=Vec2(0, 0))
+
+    new_doc, new_msp = translate_entities_to_new_layout(source_msp)
+    new_ml = new_msp[-1]
+    new_style = new_doc.mleader_styles.get("ARROW_STYLE")
+
+    assert new_style is not None
+    assert new_style.dxf.arrow_head_handle is not None
+    assert new_doc.entitydb.get(new_style.dxf.arrow_head_handle).dxf.name == "_DOT"
+    assert new_ml.dxf.style_handle == new_style.dxf.handle
+
+
+def test_multileader_arrow_override_to_code():
+    from ezdxf.render.mleader import ConnectionSide
+
+    source_doc = ezdxf.new("R2010")
+    source_msp = source_doc.modelspace()
+    builder = source_msp.add_multileader_mtext()
+    builder.set_content("note")
+    builder.set_arrow_properties(name="DOT", size=2.0)
+    builder.add_leader_line(ConnectionSide.left, [Vec2(-5, 0), Vec2(-2, 0)])
+    builder.build(insert=Vec2(0, 0))
+
+    new_doc, new_msp = translate_entities_to_new_layout(source_msp)
+    new_ml = new_msp[-1]
+
+    assert new_ml.dxf.arrow_head_handle is not None
+    assert new_doc.entitydb.get(new_ml.dxf.arrow_head_handle).dxf.name == "_DOT"
+
+
+def test_multileader_arrow_heads_to_code():
+    from ezdxf.entities.mleader import ArrowHeadData
+    from ezdxf.render.arrows import ARROWS
+    from ezdxf.render.mleader import ConnectionSide
+
+    source_doc = ezdxf.new("R2010")
+    source_msp = source_doc.modelspace()
+    builder = source_msp.add_multileader_mtext()
+    builder.set_content("note")
+    builder.add_leader_line(ConnectionSide.left, [Vec2(-5, 0), Vec2(-2, 0)])
+    builder.build(insert=Vec2(0, 0))
+    multileader = builder.multileader
+    multileader.arrow_heads = [
+        ArrowHeadData(0, ARROWS.arrow_handle(source_doc.blocks, "DOT")),
+        ArrowHeadData(1, ARROWS.arrow_handle(source_doc.blocks, "OPEN")),
+    ]
+
+    new_doc, new_msp = translate_entities_to_new_layout(source_msp)
+    new_ml = new_msp[-1]
+    arrow0, arrow1 = new_ml.arrow_heads
+
+    assert len(new_ml.arrow_heads) == 2
+    assert arrow0.index == 0
+    assert arrow1.index == 1
+    assert new_doc.entitydb.get(arrow0.handle).dxf.name == "_DOT"
+    assert new_doc.entitydb.get(arrow1.handle).dxf.name == "_OPEN"
+
+
+def test_multileader_custom_style_block_reference_missing_is_safe():
+    from ezdxf.render.mleader import ConnectionSide
+
+    source_doc = ezdxf.new("R2010")
+    style = source_doc.mleader_styles.duplicate_entry("Standard", "STYLE_BLOCK_STYLE")
+    source_doc.blocks.new("STYLE_BLOCK")
+    style.dxf.block_record_handle = source_doc.blocks.get(
+        "STYLE_BLOCK"
+    ).block_record_handle
+    source_msp = source_doc.modelspace()
+    builder = source_msp.add_multileader_mtext("STYLE_BLOCK_STYLE")
+    builder.set_content("note")
+    builder.add_leader_line(ConnectionSide.left, [Vec2(-5, 0), Vec2(-2, 0)])
+    builder.build(insert=Vec2(0, 0))
+
+    new_doc, new_msp = translate_entities_to_new_layout(source_msp)
+    new_style = new_doc.mleader_styles.get("STYLE_BLOCK_STYLE")
+
+    assert new_style is not None
+    assert new_style.dxf.hasattr("block_record_handle") is False
+    assert new_msp[-1].dxftype() == "MULTILEADER"
+
+
+def test_multileader_custom_style_block_reference_preserved_if_available():
+    from ezdxf.render.mleader import ConnectionSide
+
+    source_doc = ezdxf.new("R2010")
+    style = source_doc.mleader_styles.duplicate_entry("Standard", "STYLE_BLOCK_STYLE")
+    source_doc.blocks.new("STYLE_BLOCK")
+    style.dxf.block_record_handle = source_doc.blocks.get(
+        "STYLE_BLOCK"
+    ).block_record_handle
+    source_msp = source_doc.modelspace()
+    builder = source_msp.add_multileader_mtext("STYLE_BLOCK_STYLE")
+    builder.set_content("note")
+    builder.add_leader_line(ConnectionSide.left, [Vec2(-5, 0), Vec2(-2, 0)])
+    builder.build(insert=Vec2(0, 0))
+
+    target_doc = ezdxf.new("R2010")
+    target_doc.blocks.new("STYLE_BLOCK")
+    new_doc, _ = execute_entities_code_in_doc(source_msp, target_doc)
+    new_style = new_doc.mleader_styles.get("STYLE_BLOCK_STYLE")
+
+    assert new_style is not None
+    assert (
+        new_style.dxf.block_record_handle
+        == new_doc.blocks.get("STYLE_BLOCK").block_record_handle
+    )
+
+
+def test_multileader_block_content_to_code():
+    from ezdxf.render.mleader import ConnectionSide
+
+    source_doc = ezdxf.new("R2010")
+    block = source_doc.blocks.new("TEST_BLOCK")
+    block.add_lwpolyline([(0, 0), (1, 0), (1, 1), (0, 1)], close=True)
+    block.add_attdef("ONE", insert=(0, 0), text="ONE")
+    block.add_attdef("TWO", insert=(1, 1), text="TWO")
+    style = source_doc.mleader_styles.duplicate_entry("Standard", "BLOCK_STYLE")
+    style.dxf.block_record_handle = block.block_record_handle
+    source_msp = source_doc.modelspace()
+    builder = source_msp.add_multileader_block("BLOCK_STYLE")
+    builder.set_content(name="TEST_BLOCK")
+    builder.set_attribute("ONE", "Data1")
+    builder.set_attribute("TWO", "Data2")
+    builder.add_leader_line(ConnectionSide.right, [Vec2(5, 0)])
+    builder.build(insert=Vec2(0, 0))
+
+    target_doc = ezdxf.new("R2010")
+    namespace = {"ezdxf": ezdxf, "doc": target_doc, "msp": target_doc.modelspace()}
+    execute_code_in_namespace(block_to_code(block, drawing="doc"), namespace)
+    execute_code_in_namespace(entities_to_code(source_msp, layout="msp"), namespace)
+
+    new_doc = namespace["doc"]
+    new_msp = namespace["msp"]
+    new_ml = new_msp[-1]
+    new_block = new_doc.blocks.get("TEST_BLOCK")
+    new_style = new_doc.mleader_styles.get("BLOCK_STYLE")
+    attdef0, attdef1 = list(new_block.attdefs())
+    block_attrib0, block_attrib1 = new_ml.block_attribs
+
+    assert new_ml.dxftype() == "MULTILEADER"
+    assert new_style is not None
+    assert new_style.dxf.block_record_handle == new_block.block_record_handle
+    assert new_ml.dxf.block_record_handle == new_block.block_record_handle
+    assert new_ml.context.block is not None
+    assert new_ml.context.block.block_record_handle == new_block.block_record_handle
+    assert block_attrib0.handle == attdef0.dxf.handle
+    assert block_attrib1.handle == attdef1.dxf.handle
+    assert block_attrib0.text == "Data1"
+    assert block_attrib1.text == "Data2"
 
 
 if __name__ == "__main__":

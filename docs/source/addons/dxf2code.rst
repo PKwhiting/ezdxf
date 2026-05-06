@@ -7,6 +7,32 @@ dxf2code
 
 Translate DXF entities and structures into Python source code.
 
+`dxf2code` recreates the translated entity graph, including simple object-backed
+``FIELD`` wrappers hosted by ``TEXT``, ``ATTRIB``, ``ATTDEF`` and ``MTEXT``.
+For ``AcObjProp`` fields, the referenced target entity also has to be part of
+the translated entity set so the new field payload can be rebound to the new
+handles in the generated document.
+
+`dxf2code` also recreates ``MULTILEADER`` entities by rebuilding the nested
+context and leader-line structures in generated code.
+Hosted ``FIELD`` wrappers are preserved for MTEXT-content multileaders by the
+same deferred field reconstruction used for other supported text hosts.
+The generated code resolves the referenced ``MLEADERSTYLE``, text style and
+linetype by name in the target document. Missing referenced ``MLEADERSTYLE``
+entries are recreated in generated code from the source style data before the
+``MULTILEADER`` entity is rebuilt. Referenced arrow-head blocks on the style or
+on the ``MULTILEADER`` entity itself are rebound by block name as well.
+Referenced non-arrow style blocks are rebound if the target document already
+contains the matching block definition; otherwise that optional style handle is
+omitted to avoid failing code generation.
+
+For BLOCK-content multileaders the referenced block definition still has to
+exist in the target document, just like normal block references. The generated
+code remaps virtual block-attribute handles to the target block ATTDEF handles
+by ATTDEF order.
+Additional ``MultiLeader.arrow_heads`` collections are also rebound by block
+name.
+
 Short example:
 
 .. code-block:: Python
