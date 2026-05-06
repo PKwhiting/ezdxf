@@ -338,7 +338,7 @@ class _SourceCodeGenerator:
             self.add_source_code_line(f'# unsupported DXF entity "{dxftype}"')
         else:
             entity_translator(entity)
-            if dxftype not in TABLENAMES:
+            if dxftype not in TABLENAMES and dxftype != "MLEADERSTYLE":
                 self._register_entity_handle(entity)
                 self._schedule_hosted_fields(entity)
 
@@ -971,6 +971,9 @@ class _SourceCodeGenerator:
         self.add_source_code_lines(
             self.generic_api_call("ATTDEF", entity.dxfattribs())
         )
+
+    def _mleaderstyle(self, entity: DXFEntity) -> None:
+        self._setup_multileader_style(entity, entity.dxf.name)
 
     def _ellipse(self, entity: DXFEntity) -> None:
         self.add_source_code_lines(

@@ -461,6 +461,43 @@ def test_ltype_entry():
     assert any(line.endswith("LinetypePattern") for line in code.imports)
 
 
+def test_mleaderstyle_entry():
+    source_doc = ezdxf.new("R2010")
+    style = source_doc.mleader_styles.duplicate_entry("Standard", "TEST_STYLE")
+    style.dxf.default_text_content = "STYLE_TEXT"
+    style.dxf.char_height = 3.5
+    style.set_arrow_head("DOT")
+
+    target_doc = ezdxf.new("R2010")
+    namespace = {"ezdxf": ezdxf, "doc": target_doc}
+    code = table_entries_to_code([style], drawing="doc")
+    execute_code_in_namespace(code, namespace)
+    new_style = target_doc.mleader_styles.get("TEST_STYLE")
+
+    assert new_style is not None
+    assert new_style.dxf.default_text_content == "STYLE_TEXT"
+    assert new_style.dxf.char_height == 3.5
+    assert target_doc.entitydb.get(new_style.dxf.arrow_head_handle).dxf.name == "_DOT"
+
+
+def test_mleaderstyle_entry_missing_block_handle_is_safe():
+    source_doc = ezdxf.new("R2010")
+    style = source_doc.mleader_styles.duplicate_entry("Standard", "TEST_STYLE")
+    source_doc.blocks.new("STYLE_BLOCK")
+    style.dxf.block_record_handle = source_doc.blocks.get(
+        "STYLE_BLOCK"
+    ).block_record_handle
+
+    target_doc = ezdxf.new("R2010")
+    namespace = {"ezdxf": ezdxf, "doc": target_doc}
+    code = table_entries_to_code([style], drawing="doc")
+    execute_code_in_namespace(code, namespace)
+    new_style = target_doc.mleader_styles.get("TEST_STYLE")
+
+    assert new_style is not None
+    assert new_style.dxf.hasattr("block_record_handle") is False
+
+
 def test_block_to_code():
     testdoc = ezdxf.new()
     block = testdoc.blocks.new("TestBlock", dxfattribs={"description": "test"})

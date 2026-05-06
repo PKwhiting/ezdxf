@@ -13,6 +13,10 @@ For ``AcObjProp`` fields, the referenced target entity also has to be part of
 the translated entity set so the new field payload can be rebound to the new
 handles in the generated document.
 
+Direct ``MLEADERSTYLE`` object generation is also supported by
+`table_entries_to_code`, including the same style-resource rebinding rules used
+by generated ``MULTILEADER`` entities.
+
 `dxf2code` also recreates ``MULTILEADER`` entities by rebuilding the nested
 context and leader-line structures in generated code.
 Hosted ``FIELD`` wrappers are preserved for MTEXT-content multileaders by the
