@@ -4,6 +4,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Iterable, Optional, Iterator
 from typing_extensions import Self
 import copy
+from dataclasses import dataclass, field
 from ezdxf.math import Vec3, Matrix44
 from ezdxf.lldxf.tags import Tags, group_tags
 from ezdxf.lldxf.attributes import (
@@ -28,10 +29,206 @@ if TYPE_CHECKING:
 
 __all__ = [
     "AcadTable",
+    "AcadTableCell",
+    "AcadTableData",
     "AcadTableBlockContent",
     "acad_table_to_block",
     "read_acad_table_content",
 ]
+
+
+@dataclass
+class AcadTableCell:
+    row: int
+    col: int
+    cell_type: int = 1
+    flags: int = 0
+    merged_value: int = 0
+    autofit_flag: int = 0
+    border_width: int = 0
+    border_height: int = 0
+    override_flags: int = 0
+    virtual_edge_flag: int = 0
+    rotation: float = 0.0
+    text: str = ""
+    block_record_handle: Optional[str] = None
+    block_scale: float = 1.0
+    block_attribute_count: int = 0
+    text_height: Optional[float] = None
+    alignment: Optional[int] = None
+    text_style: Optional[str] = None
+    content_color: Optional[int] = None
+    fill_color: Optional[int] = None
+    fill_true_color: Optional[int] = None
+    fill_enabled: Optional[int] = None
+    field_handle: Optional[str] = None
+
+    @property
+    def is_text_cell(self) -> bool:
+        return self.cell_type == 1
+
+    @property
+    def is_block_cell(self) -> bool:
+        return self.cell_type == 2
+
+
+@dataclass
+class AcadTableData:
+    n_rows: int = 0
+    n_cols: int = 0
+    row_heights: list[float] = field(default_factory=list)
+    col_widths: list[float] = field(default_factory=list)
+    cells: list[AcadTableCell] = field(default_factory=list)
+    suppress_title: Optional[int] = None
+    suppress_column_header: Optional[int] = None
+    trailing_tags: Tags = field(default_factory=Tags)
+
+    def rows(self) -> list[list[AcadTableCell]]:
+        if self.n_rows <= 0 or self.n_cols <= 0:
+            return [list(self.cells)] if len(self.cells) else []
+        rows: list[list[AcadTableCell]] = []
+        for index in range(self.n_rows):
+            start = index * self.n_cols
+            rows.append(self.cells[start : start + self.n_cols])
+        return rows
+
+    def text_content(self) -> list[list[str]]:
+        return [[cell.text for cell in row] for row in self.rows()]
+
+
+def _parse_acad_table_content(dxf, tags: Tags) -> AcadTableData:
+    start = 1 if len(tags) and tags[0].code == 100 else 0
+    data = AcadTableData()
+    set_attrib = dxf.unprotected_set
+
+    index = start
+    version_loaded = False
+    while index < len(tags):
+        tag = tags[index]
+        code = tag.code
+        if code in (141, 142, 171):
+            break
+        if code == 280:
+            if not version_loaded:
+                set_attrib("version", int(tag.value))
+                version_loaded = True
+            elif data.suppress_title is None:
+                data.suppress_title = int(tag.value)
+        elif code == 281:
+            if data.suppress_column_header is None:
+                data.suppress_column_header = int(tag.value)
+        elif code == 342:
+            set_attrib("table_style_id", str(tag.value))
+        elif code == 343:
+            set_attrib("block_record_handle", str(tag.value))
+        elif code == 11:
+            set_attrib("horizontal_direction", tag.value)
+        elif code == 90 and not dxf.hasattr("table_value"):
+            set_attrib("table_value", int(tag.value))
+        elif code == 91 and not dxf.hasattr("n_rows"):
+            set_attrib("n_rows", int(tag.value))
+        elif code == 92 and not dxf.hasattr("n_cols"):
+            set_attrib("n_cols", int(tag.value))
+        elif code == 93 and not dxf.hasattr("override_flag"):
+            set_attrib("override_flag", int(tag.value))
+        elif code == 94 and not dxf.hasattr("border_color_override_flag"):
+            set_attrib("border_color_override_flag", int(tag.value))
+        elif code == 95 and not dxf.hasattr("border_lineweight_override_flag"):
+            set_attrib("border_lineweight_override_flag", int(tag.value))
+        elif code == 96 and not dxf.hasattr("border_visibility_override_flag"):
+            set_attrib("border_visibility_override_flag", int(tag.value))
+        index += 1
+
+    data.n_rows = int(dxf.get("n_rows", 0))
+    data.n_cols = int(dxf.get("n_cols", 0))
+
+    while index < len(tags) and tags[index].code == 141:
+        data.row_heights.append(float(tags[index].value))
+        index += 1
+    while index < len(tags) and tags[index].code == 142:
+        data.col_widths.append(float(tags[index].value))
+        index += 1
+
+    expected_cells = data.n_rows * data.n_cols
+    cells: list[AcadTableCell] = []
+    while index < len(tags) and (expected_cells == 0 or len(cells) < expected_cells):
+        if tags[index].code != 171:
+            break
+        start_index = index
+        index += 1
+        while index < len(tags) and tags[index].code != 171:
+            index += 1
+        cells.append(_parse_acad_table_cell(tags[start_index:index], len(cells), data.n_cols))
+
+    data.cells = cells
+    data.trailing_tags = Tags(tags[index:])
+    return data
+
+
+def _parse_acad_table_cell(tags: Tags, cell_index: int, n_cols: int) -> AcadTableCell:
+    row = cell_index // n_cols if n_cols else 0
+    col = cell_index % n_cols if n_cols else cell_index
+    cell = AcadTableCell(row=row, col=col)
+
+    in_value = False
+    plain_value_tags: list[str] = []
+    chunked_value_tags: list[str] = []
+    for code, value in tags:
+        if in_value:
+            if code == 304 and value == "ACVALUE_END":
+                in_value = False
+                continue
+            if code == 302:
+                chunked_value_tags.append(str(value))
+            elif code in (1, 2, 3):
+                plain_value_tags.append(str(value))
+            continue
+
+        if code == 171 and cell.cell_type == 1:
+            cell.cell_type = int(value)
+        elif code == 172:
+            cell.flags = int(value)
+        elif code == 173:
+            cell.merged_value = int(value)
+        elif code == 174:
+            cell.autofit_flag = int(value)
+        elif code == 175:
+            cell.border_width = int(value)
+        elif code == 176:
+            cell.border_height = int(value)
+        elif code == 91:
+            cell.override_flags = int(value)
+        elif code == 178:
+            cell.virtual_edge_flag = int(value)
+        elif code == 145:
+            cell.rotation = float(value)
+        elif code == 340:
+            cell.block_record_handle = str(value)
+        elif code == 144:
+            cell.block_scale = float(value)
+        elif code == 179:
+            cell.block_attribute_count = int(value)
+        elif code == 140:
+            cell.text_height = float(value)
+        elif code == 170:
+            cell.alignment = int(value)
+        elif code == 7:
+            cell.text_style = str(value)
+        elif code == 64:
+            cell.content_color = int(value)
+        elif code == 63:
+            cell.fill_color = int(value)
+        elif code in (420, 421):
+            cell.fill_true_color = int(value)
+        elif code == 283:
+            cell.fill_enabled = int(value)
+        elif code == 344:
+            cell.field_handle = str(value)
+        elif code == 301 and value == "CELL_VALUE":
+            in_value = True
+
+    cell.text = "".join(chunked_value_tags or plain_value_tags)
+    return cell
 
 
 acdb_block_reference = DefSubclass(
@@ -248,7 +445,7 @@ class AcadTable(DXFGraphic):
 
     def __init__(self):
         super().__init__()
-        self.data = None
+        self.data: Optional[AcadTableData] = None
 
     def copy_data(self, entity: Self, copy_strategy=default_copy) -> None:
         """Copy data."""
@@ -263,14 +460,13 @@ class AcadTable(DXFGraphic):
             processor.fast_load_dxfattribs(
                 dxf, acdb_block_reference_group_codes, subclass=2
             )
-            tags = processor.fast_load_dxfattribs(
-                dxf, acdb_table_group_codes, subclass=3, log=False
-            )
-            self.load_table(tags)
+            tags = processor.subclass_by_index(3)
+            if tags is not None:
+                self.load_table(tags)
         return dxf
 
     def load_table(self, tags: Tags):
-        pass
+        self.data = _parse_acad_table_content(self.dxf, tags)
 
     def export_entity(self, tagwriter: AbstractTagWriter) -> None:
         """Export entity specific data as DXF tags."""
@@ -361,6 +557,10 @@ class AcadTableBlockContent(DXFTagStorage):
         base_class, acdb_entity, acdb_block_reference, acdb_table
     )
 
+    def __init__(self) -> None:
+        super().__init__()
+        self.data: Optional[AcadTableData] = None
+
     def load_dxf_attribs(
         self, processor: Optional[SubclassProcessor] = None
     ) -> DXFNamespace:
@@ -369,10 +569,21 @@ class AcadTableBlockContent(DXFTagStorage):
             processor.fast_load_dxfattribs(
                 dxf, acdb_block_reference_group_codes, subclass=2
             )
-            processor.fast_load_dxfattribs(
-                dxf, acdb_table_group_codes, subclass=3, log=False
-            )
+            tags = processor.subclass_by_index(3)
+            if tags is not None:
+                self.data = _parse_acad_table_content(dxf, tags)
         return dxf
+
+    def rows(self) -> list[list[AcadTableCell]]:
+        if self.data is None:
+            return []
+        return self.data.rows()
+
+    def get_cell(self, row: int, col: int) -> AcadTableCell:
+        if self.data is None:
+            raise IndexError("ACAD_TABLE has no parsed cell data")
+        index = row * max(self.data.n_cols, 1) + col
+        return self.data.cells[index]
 
     def proxy_graphic_content(self) -> Iterable[DXFGraphic]:
         return super().__virtual_entities__()
@@ -444,6 +655,9 @@ def read_acad_table_content(table: DXFTagStorage) -> list[list[str]]:
     """
     if table.dxftype() != "ACAD_TABLE":
         raise const.DXFTypeError(f"Expected ACAD_TABLE entity, got {str(table)}")
+    data = getattr(table, "data", None)
+    if isinstance(data, AcadTableData):
+        return data.text_content()
     acdb_table = table.xtags.get_subclass("AcDbTable")
 
     nrows = acdb_table.get_first_value(91, 0)

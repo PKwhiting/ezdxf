@@ -206,8 +206,20 @@ complete content is stored in the first row. All cells contain strings.
 
 .. important::
 
-    The ACAD_TABLE entity has only limited support to preserve the entity. There is no
-    support for adding a new ACAD_TABLE entity or modifying it's content.
+    The ACAD_TABLE entity still has limited support compared to simpler DXF
+    entities. There is no support for adding a new ACAD_TABLE entity or
+    modifying its content.
+
+    Current read support includes:
+
+    - row count and column count
+    - row heights and column widths
+    - ordered text cell content
+    - a readable subset of explicit cell-local overrides such as text height
+      and alignment
+
+    Some visual text formatting, such as content color, can also be stored
+    inline in the cell text payload itself, similar to MTEXT formatting codes.
 
 INSERT Entity - Block References
 --------------------------------

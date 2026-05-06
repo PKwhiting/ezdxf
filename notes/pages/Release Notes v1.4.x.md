@@ -55,6 +55,12 @@
 		- recreates custom `MLEADERSTYLE` entries and arrow-head mappings
 		- supports direct `MLEADERSTYLE` generation by `table_entries_to_code()`
 		- validated by AutoCAD/Core Console roundtrip artifacts
+	- Initial typed `ACAD_TABLE` read support:
+		- reads row and column counts
+		- reads row heights and column widths
+		- reads ordered text cell content
+		- reads a first subset of explicit cell-local overrides such as text height and alignment
+		- preserves inline text formatting stored in cell payload strings
 	- Initial inferred object-property support for:
 		- `LINE.Length`
 		- `CIRCLE.Radius`

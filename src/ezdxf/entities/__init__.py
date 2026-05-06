@@ -101,6 +101,9 @@ from .mleader import MLeader, MLeaderStyle, MLeaderStyleCollection, MultiLeader
 
 from .light import Light
 from .acad_table import (
+    AcadTable,
+    AcadTableCell,
+    AcadTableData,
     AcadTableBlockContent,
     acad_table_to_block,
     read_acad_table_content,

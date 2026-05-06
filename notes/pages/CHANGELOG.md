@@ -17,6 +17,11 @@
 		- preserves supported hosted field graphs during code generation roundtrip
 		- recreates MTEXT-content and block-content `MULTILEADER` entities, custom `MLEADERSTYLE`, and arrow-head mappings
 		- supports direct `MLEADERSTYLE` generation by `table_entries_to_code()`
+	- NEW: initial typed `ACAD_TABLE` read support
+		- reads row and column counts, row heights, and column widths
+		- reads ordered text cell content
+		- reads a first subset of explicit cell-local overrides such as text height and alignment
+		- preserves inline cell text formatting codes as stored by AutoCAD
 	- NEW: initial automatic `AcObjProp` inference support for common cases
 		- `LINE.Length`
 		- `CIRCLE.Radius`
