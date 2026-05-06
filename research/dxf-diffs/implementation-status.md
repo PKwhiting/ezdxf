@@ -16,6 +16,7 @@ Based on:
 - `RE-0007` UI-authored custom `DWGPROPS ProjectCode`
 - `RE-0008` UI-authored `MULTILEADER` object-property field
 - `RE-0009` UI-authored bulged-hole `HATCH` area
+- `RE-0010` `dxf2code` field / `MULTILEADER` roundtrip validation
 
 Code support currently exists for:
 
@@ -29,6 +30,10 @@ Code support currently exists for:
 - object-backed `DWGPROPS` child field creation
 - object-backed `AcObjProp` child field creation
 - `INSERT.add_attrib_*_field(...)` convenience wrappers
+- `dxf2code` reconstruction of hosted field graphs for supported text hosts
+- `dxf2code` reconstruction of `MULTILEADER` entities, including MTEXT content,
+  BLOCK content, custom `MLEADERSTYLE`, and arrow-head mappings
+- direct `MLEADERSTYLE` code generation via `table_entries_to_code(...)`
 
 Current convenience API:
 
@@ -80,6 +85,13 @@ embedded MTEXT content now uses the observed `BY_LAYER` text color and
 The current raw `MULTILEADER` output can omit proxy graphics and still be
 accepted by AutoCAD; AutoCAD synthesizes proxy graphics on the first save.
 
+The dedicated `dxf2code` roundtrip validation artifact is also accepted by
+AutoCAD Core Console after recreating the document from generated Python source.
+The observed `before.dxf` -> `after.dxf` deltas are limited to normal AutoCAD
+canonicalization effects such as timestamps, handle/guid churn, proxy-graphic or
+embedded binary cache rewrites, and the already-known `MULTILEADER` child-field
+cache state flip for `AcObjProp` fields.
+
 For `HATCH.Area`, the current implementation already matches the area of a
 UI-authored bulged-hole hatch after AutoCAD rewrites that hatch to a single
 canonicalized polyline boundary path. The remaining unsupported hatch case is
@@ -100,6 +112,8 @@ Validated artifacts:
 - `experiments/ezdxf-generated-fields/dwgprops_hosts_validation.dxf`
 - `experiments/ezdxf-generated-fields/all_supported_fields_validation.dxf`
 - `experiments/ezdxf-generated-fields/all_supported_field_flows_validation.dxf`
+- `experiments/ezdxf-generated-fields/dxf2code_roundtrip_validation.dxf`
+- `experiments/ezdxf-generated-fields/dxf2code_roundtrip_validation_generated.py`
 
 ## Remaining Gaps
 
@@ -109,6 +123,9 @@ Validated artifacts:
 4. Raw multi-path bulged-hole `HATCH.Area` semantics are still not modeled.
 5. No dedicated parser/authoring support yet for deeper nested field trees.
 6. No public guarantee yet that the field API is stable; it should still be treated as experimental.
+7. `dxf2code` roundtrip coverage is now validated for the supported hosted-field
+   and `MULTILEADER` surface, but byte-level parity with AutoCAD-saved DXFs is
+   not a goal.
 
 ## Recommended Next Work
 

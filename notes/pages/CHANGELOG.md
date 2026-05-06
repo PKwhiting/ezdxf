@@ -8,6 +8,15 @@
 		- `MText.new_acvar_field()`
 		- `MText.new_acobjprop_field()`
 		- currently validated by AutoCAD roundtrip experiments for `AcVar` fields and `AcObjProp` fields
+	- NEW: broadened experimental object-backed field support to additional hosts and flows
+		- added `TEXT`, `ATTDEF`, `ATTRIB`, and `MULTILEADER` host support
+		- added `DWGPROPS` helpers for supported hosts
+		- expanded inferred `AcObjProp` coverage for arcs, circles, ellipses, splines, polylines, and supported hatch area cases
+		- validated by AutoCAD/Core Console roundtrip artifacts
+	- NEW: major `ezdxf.addons.dxf2code` compatibility improvements for fields and `MULTILEADER`
+		- preserves supported hosted field graphs during code generation roundtrip
+		- recreates MTEXT-content and block-content `MULTILEADER` entities, custom `MLEADERSTYLE`, and arrow-head mappings
+		- supports direct `MLEADERSTYLE` generation by `table_entries_to_code()`
 	- NEW: initial automatic `AcObjProp` inference support for common cases
 		- `LINE.Length`
 		- `CIRCLE.Radius`
@@ -36,6 +45,8 @@
 	- BUGFIX: Layer linetype patterns are empty when using custom layout properties
 		- {{issue 1368}}
 		- contributed by #enriqueav
+	- BUGFIX: `dxf2code` recreated attached `ATTRIB` entities of block references as standalone layout entities
+		- fixed duplicate-handle DXF export in AutoCAD-validated roundtrip reconstruction
 	- BUGFIX: handle loaded `TEXT` and `MTEXT` entities with a height of 0
 		- {{issue 1372}}
 	- BUGFIX: `xref` module now handles empty entities like `Polyline` in blocks correct

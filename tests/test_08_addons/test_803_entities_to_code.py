@@ -269,6 +269,22 @@ def test_insert_to_code():
         assert new_entity.get_dxf_attrib(name) == entity.get_dxf_attrib(name)
 
 
+def test_insert_with_attrib_to_code():
+    source_doc = ezdxf.new("R2010")
+    source_doc.blocks.new("ATTRIB_BLOCK")
+    source_msp = source_doc.modelspace()
+    insert = source_msp.add_blockref("ATTRIB_BLOCK", (2, 3, 4))
+    insert.add_attrib("TAG1", "Text1", (5, 6, 7))
+
+    _, new_msp = translate_entities_to_new_layout([insert])
+    new_insert = next(entity for entity in new_msp if entity.dxftype() == "INSERT")
+
+    assert len(new_insert.attribs) == 1
+    assert len([entity for entity in new_msp if entity.dxftype() == "ATTRIB"]) == 0
+    assert new_insert.attribs[0].dxf.tag == "TAG1"
+    assert new_insert.attribs[0].dxf.text == "Text1"
+
+
 def test_attdef_to_code():
     from ezdxf.entities.attrib import AttDef
 

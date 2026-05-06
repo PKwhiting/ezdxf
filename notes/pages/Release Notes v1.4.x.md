@@ -45,6 +45,16 @@
 	- Initial convenience API for:
 		- drawing-variable fields
 		- object-property fields
+	- Expanded experimental object-backed field support to:
+		- `TEXT`, `ATTDEF`, `ATTRIB`, and `MULTILEADER` hosts
+		- `DWGPROPS` helper flows for supported hosts
+		- broader inferred `AcObjProp` coverage for arcs, circles, ellipses, splines, polylines, and supported `HATCH.Area` cases
+	- Major `dxf2code` compatibility improvements:
+		- preserves supported hosted field graphs
+		- recreates MTEXT-content and block-content `MULTILEADER` entities
+		- recreates custom `MLEADERSTYLE` entries and arrow-head mappings
+		- supports direct `MLEADERSTYLE` generation by `table_entries_to_code()`
+		- validated by AutoCAD/Core Console roundtrip artifacts
 	- Initial inferred object-property support for:
 		- `LINE.Length`
 		- `CIRCLE.Radius`

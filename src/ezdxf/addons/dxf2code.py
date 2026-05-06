@@ -1004,16 +1004,18 @@ class _SourceCodeGenerator:
         )
         if len(entity.attribs):
             for attrib in entity.attribs:
-                dxfattribs = attrib.dxfattribs()
+                dxfattribs = _purge_handles(attrib.dxfattribs())
                 dxfattribs[
                     "layer"
                 ] = entity.dxf.layer  # set ATTRIB layer to same as INSERT
+                self.add_used_resources(dxfattribs)
                 self.add_source_code_lines(
-                    self.generic_api_call(
-                        "ATTRIB", attrib.dxfattribs(), prefix="a = "
+                    _fmt_api_call(
+                        "a = e.add_attrib(",
+                        ["tag", "text", "insert"],
+                        dxfattribs,
                     )
                 )
-                self.add_source_code_line("e.attribs.append(a)")
                 self._register_entity_handle(attrib, var_name="a")
                 self._schedule_hosted_fields(attrib)
 

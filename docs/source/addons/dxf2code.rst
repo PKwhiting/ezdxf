@@ -37,6 +37,12 @@ by ATTDEF order.
 Additional ``MultiLeader.arrow_heads`` collections are also rebound by block
 name.
 
+The current supported field and ``MULTILEADER`` round-trip surface is also
+validated by a dedicated AutoCAD/Core Console artifact under
+``experiments/ezdxf-generated-fields/dxf2code_roundtrip_validation.dxf`` and
+its generated Python source companion
+``experiments/ezdxf-generated-fields/dxf2code_roundtrip_validation_generated.py``.
+
 Short example:
 
 .. code-block:: Python
@@ -51,7 +57,13 @@ Short example:
     # create source code for a block definition
     block_source = block_to_code(doc.blocks['MyBlock'])
 
+    # create source code for required object-style entries
+    style_source = table_entries_to_code([
+        doc.mleader_styles.get('MyMLeaderStyle'),
+    ])
+
     # merge source code objects
+    source.merge(style_source)
     source.merge(block_source)
 
     with open('source.py', mode='wt') as f:
@@ -114,5 +126,10 @@ Short example:
     .. automethod:: add_line
 
     .. automethod:: add_lines
+
+Generation order matters for some structures. For example, block definitions
+required by block-content ``MULTILEADER`` entities should be generated before
+the entity code, and direct ``MLEADERSTYLE`` objects can be generated through
+`table_entries_to_code(...)` before the consuming entities are recreated.
 
 
