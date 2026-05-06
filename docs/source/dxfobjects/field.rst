@@ -7,7 +7,12 @@ Field
 The `FIELD` object stores AutoCAD field expressions and related cached values.
 
 This object is most useful in combination with object-backed field graphs hosted
-by :class:`~ezdxf.entities.MText` entities.
+by supported host entities such as :class:`~ezdxf.entities.MText`,
+:class:`~ezdxf.entities.Text`, and :class:`~ezdxf.entities.MultiLeader`.
+
+The low-level `FIELD` object support is broader than the current high-level
+authoring helpers. For the current validated host/entity/property matrix, see
+the :ref:`field tutorial <tut_fields>`.
 
 ======================== =========================================================
 Subclass of              :class:`ezdxf.entities.DXFObject`

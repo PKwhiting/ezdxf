@@ -22,6 +22,96 @@ Supported field families
 - ``DWGPROPS`` via the observed ``AcVar CustomDP.<Name>`` pattern
 - ``AcObjProp``
 
+Support model
+-------------
+
+There are two different support layers:
+
+- structural DXF support for object-backed ``FIELD`` and ``FIELDLIST`` objects
+- selective high-level authoring support for specific field hosts and specific
+  field/property cases
+
+This means `ezdxf` can build and preserve object-backed field graphs in general,
+but only a validated subset of field families and object-property cases are
+exposed by the current convenience API.
+
+`ezdxf` does not evaluate fields by itself. AutoCAD is still the authoritative
+field evaluator in the current workflow.
+
+Host / family matrix
+--------------------
+
+.. list-table::
+    :header-rows: 1
+
+    * - Host
+      - ``AcVar``
+      - ``DWGPROPS``
+      - ``AcObjProp``
+      - Notes
+    * - :class:`~ezdxf.entities.MText`
+      - yes
+      - yes
+      - yes
+      - object-backed host with dedicated layout helpers
+    * - :class:`~ezdxf.entities.Text`
+      - yes
+      - yes
+      - yes
+      - also covers ``ATTRIB`` and ``ATTDEF`` entity-level helpers
+    * - :class:`~ezdxf.entities.MultiLeader`
+      - yes
+      - yes
+      - yes
+      - MTEXT-content leaders only
+    * - :class:`~ezdxf.entities.AttDef`
+      - yes
+      - yes
+      - yes
+      - stand-alone attribute definitions
+    * - :class:`~ezdxf.entities.Attrib`
+      - yes
+      - yes
+      - yes
+      - attached to ``INSERT`` entities
+
+Object-property support matrix
+------------------------------
+
+.. list-table::
+    :header-rows: 1
+
+    * - Entity
+      - Supported properties
+      - Notes
+    * - ``LINE``
+      - ``Length``
+      - exact
+    * - ``ARC``
+      - ``Radius``, ``Length``, ``ArcLength``, ``Area``
+      - exact
+    * - ``CIRCLE``
+      - ``Radius``, ``Diameter``, ``Circumference``, ``Area``
+      - exact
+    * - ``ELLIPSE``
+      - ``MajorRadius``, ``MinorRadius``, ``Area``
+      - exact for full ellipses and ellipse arcs
+    * - ``SPLINE``
+      - ``Area``
+      - planar splines only; approximation-based
+    * - ``POLYLINE``
+      - ``Length``, ``Area``
+      - 2D polylines with straight or circular-arc segments
+    * - ``POLYLINE``
+      - ``Length``
+      - 3D polylines only
+    * - ``LWPOLYLINE``
+      - ``Length``, ``Area``
+      - 2D polylines with straight or circular-arc segments
+    * - ``HATCH``
+      - ``Area``
+      - polyline boundary paths, simple non-bulged hole loops, and single line/arc/ellipse/spline edge paths
+
 Drawing property fields
 -----------------------
 
@@ -118,6 +208,26 @@ Builder-level helpers for MTEXT MULTILEADER content:
 - :meth:`~ezdxf.render.MultiLeaderMTextBuilder.set_acvar_field`
 - :meth:`~ezdxf.render.MultiLeaderMTextBuilder.set_dwgprops_field`
 - :meth:`~ezdxf.render.MultiLeaderMTextBuilder.set_acobjprop_field`
+
+Known gaps
+----------
+
+- ``MULTILEADER`` object-property child cache values still oscillate across
+  repeated AutoCAD saves, even though the field graph survives.
+- Raw multi-path bulged-hole ``HATCH.Area`` authoring is still not modeled.
+- ``MPOLYGON.Area`` did not resolve in AutoCAD during probing.
+- ``3DFACE`` and ``SOLID`` did not expose useful probed object-property cases.
+- ``POLYLINE`` 3D ``Area`` did not resolve in AutoCAD during probing.
+- ``SPLINE.Length`` and ``SPLINE.ArcLength`` did not resolve in AutoCAD during probing.
+- Several intuitive names such as ``ARC.Diameter`` and ``ELLIPSE.Length`` are not supported by AutoCAD in the current probe set.
+
+Validation artifact
+-------------------
+
+For a compact visual smoke test of the currently supported recent additions,
+see:
+
+- ``experiments/ezdxf-generated-fields/recent_supported_fields_validation.dxf``
 
 Notes
 -----

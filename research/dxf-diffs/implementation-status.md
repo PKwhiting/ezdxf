@@ -15,6 +15,7 @@ Based on:
 - `RE-0006` UI-authored `DWGPROPS Title`
 - `RE-0007` UI-authored custom `DWGPROPS ProjectCode`
 - `RE-0008` UI-authored `MULTILEADER` object-property field
+- `RE-0009` UI-authored bulged-hole `HATCH` area
 
 Code support currently exists for:
 
@@ -79,6 +80,11 @@ embedded MTEXT content now uses the observed `BY_LAYER` text color and
 The current raw `MULTILEADER` output can omit proxy graphics and still be
 accepted by AutoCAD; AutoCAD synthesizes proxy graphics on the first save.
 
+For `HATCH.Area`, the current implementation already matches the area of a
+UI-authored bulged-hole hatch after AutoCAD rewrites that hatch to a single
+canonicalized polyline boundary path. The remaining unsupported hatch case is
+raw multi-path bulged-hole authoring.
+
 `MULTILEADER` still has one unresolved roundtrip difference for
 object-property fields: AutoCAD oscillates the cached child-field value
 metadata across repeated saves (`94: 59 <-> 27`, `93: 4 <-> 0`, and
@@ -100,11 +106,13 @@ Validated artifacts:
 1. Byte-level parity with UI-authored field graphs is not guaranteed.
 2. `MULTILEADER` `AcObjProp` cache behavior is still not stable across repeated saves.
 3. `AcObjProp` property coverage is still intentionally narrow.
-4. No dedicated parser/authoring support yet for deeper nested field trees.
-5. No public guarantee yet that the field API is stable; it should still be treated as experimental.
+4. Raw multi-path bulged-hole `HATCH.Area` semantics are still not modeled.
+5. No dedicated parser/authoring support yet for deeper nested field trees.
+6. No public guarantee yet that the field API is stable; it should still be treated as experimental.
 
 ## Recommended Next Work
 
 1. Investigate why repeated AutoCAD saves flip the `MULTILEADER` child `AcObjProp` cache state.
-2. Expand `AcObjProp` inference selectively based on concrete reverse-engineering evidence.
-3. Decide when to graduate the convenience API from experimental to supported.
+2. Decide whether raw multi-path bulged-hole hatches should be canonicalized before area inference.
+3. Expand `AcObjProp` inference selectively based on concrete reverse-engineering evidence.
+4. Decide when to graduate the convenience API from experimental to supported.

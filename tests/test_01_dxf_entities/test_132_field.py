@@ -711,6 +711,27 @@ def test_new_acobjprop_field_supports_hatch_edge_spline_area():
     assert "Area" in child.field_code
 
 
+def test_new_acobjprop_field_supports_canonicalized_bulged_hatch_area():
+    doc = ezdxf.new("R2007")
+    hatch = doc.modelspace().add_hatch(color=1)
+    hatch.paths.add_polyline_path(
+        [
+            (8.0, 8.0, 0.0),
+            (2.0, 8.0, 0.0),
+            (2.0, 2.0, 0.1844830881382522),
+            (2.763932022500209, 0.0, 0.0),
+            (7.236067977499788, 0.0, 0.1844830881382522),
+            (8.0, 2.0, 0.0),
+        ],
+        is_closed=True,
+    )
+    mtext = doc.modelspace().add_mtext("TEXT")
+    child, _ = mtext.new_acobjprop_field(hatch, "Area", register_field_list=True)
+    assert child.evaluator_id == "AcObjProp"
+    assert mtext.text == "47.0397"
+    assert "Area" in child.field_code
+
+
 def test_new_acobjprop_field_supports_ellipse_major_radius():
     doc = ezdxf.new("R2007")
     ellipse = doc.modelspace().add_ellipse((0, 0), major_axis=(5, 0), ratio=0.5)

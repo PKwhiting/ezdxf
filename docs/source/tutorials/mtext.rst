@@ -104,6 +104,9 @@ Currently supported automatic object-property inference:
 - ``CIRCLE.Area``
 - ``LWPOLYLINE.Area`` for 2D polylines with straight or circular-arc segments
 
+See also :ref:`tut_fields` for the cross-host support matrix and the current
+known gaps.
+
 Example:
 
 .. code-block:: python
