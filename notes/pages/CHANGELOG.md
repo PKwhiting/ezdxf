@@ -22,6 +22,16 @@
 		- reads ordered text cell content
 		- reads a first subset of explicit cell-local overrides such as text height and alignment
 		- preserves inline cell text formatting codes as stored by AutoCAD
+		- reads linked `TABLECONTENT` payloads for richer block-cell content, including ATTDEF-backed block-cell attribute values when present
+		- resolves ATTDEF-backed block-cell attribute payloads back to tag/value dictionaries for loaded tables
+		- resolves text-cell `FIELD` handles back to loaded `FIELD` objects when present
+	- NEW: initial typed `TABLESTYLE` read support
+		- registers and loads real `TABLESTYLE` objects instead of falling back to raw tag storage
+		- exposes `doc.table_styles`
+		- parses the title/header/data style buckets and key readable defaults
+	- NEW: initial typed `TABLECONTENT` read support
+		- loads linked table-content objects as typed entities instead of opaque raw tag storage
+		- parses linked table-cell payloads for richer block-cell content
 	- NEW: initial automatic `AcObjProp` inference support for common cases
 		- `LINE.Length`
 		- `CIRCLE.Radius`

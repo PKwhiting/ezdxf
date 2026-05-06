@@ -151,6 +151,8 @@ CELLCONTENT_END
 - Cell-local override bitmasks are meaningful and should be preserved/exposed even if not fully decoded.
 - Not every visual text change becomes a separate DXF tag; inline text formatting has to be preserved as part of the cell text payload.
 - The next layer after the MVP is not full `TABLESTYLE` decoding first; it is parsing the linked `TABLECONTENT` objects to expose richer block-cell payloads and formatted cell content.
+- A useful adjacent improvement is typed `TABLESTYLE` read support for the three readable style buckets (Title/Header/Data), without attempting full write support.
+- That linked table-content layer is valuable enough to justify its own typed `TABLECONTENT` loader, instead of treating it as opaque tag storage.
 - Full `TABLESTYLE` and generated geometry decoding can be deferred; they are not prerequisites for basic semantic table access.
 
 ## Likely ezdxf Targets

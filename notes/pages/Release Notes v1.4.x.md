@@ -61,6 +61,16 @@
 		- reads ordered text cell content
 		- reads a first subset of explicit cell-local overrides such as text height and alignment
 		- preserves inline text formatting stored in cell payload strings
+		- reads linked `TABLECONTENT` payloads for block-cell attribute values when present
+		- resolves ATTDEF-backed block-cell attribute values by tag name for loaded tables
+		- resolves text-cell `FIELD` handles when present
+	- Initial typed `TABLESTYLE` read support:
+		- loads real `TABLESTYLE` objects
+		- exposes `doc.table_styles`
+		- parses the title/header/data style buckets and key readable defaults
+	- Initial typed `TABLECONTENT` read support:
+		- loads linked table-content objects as typed entities
+		- parses linked table-cell payloads for richer block-cell content
 	- Initial inferred object-property support for:
 		- `LINE.Length`
 		- `CIRCLE.Radius`

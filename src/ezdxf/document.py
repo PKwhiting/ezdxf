@@ -27,6 +27,7 @@ import ezdxf
 from ezdxf.audit import Auditor
 from ezdxf.entities.dxfgroups import GroupCollection
 from ezdxf.entities.material import MaterialCollection
+from ezdxf.entities.acad_table import TableStyleManager
 from ezdxf.entities.mleader import MLeaderStyleCollection
 from ezdxf.entities.mline import MLineStyleCollection
 from ezdxf.entitydb import EntityDB
@@ -151,6 +152,7 @@ class Drawing:
         self.layouts: Layouts = None  # type: ignore
         self.groups: GroupCollection = None  # type: ignore
         self.materials: MaterialCollection = None  # type: ignore
+        self.table_styles: TableStyleManager = None  # type: ignore
         self.mleader_styles: MLeaderStyleCollection = None  # type: ignore
         self.mline_styles: MLineStyleCollection = None  # type: ignore
 
@@ -198,6 +200,7 @@ class Drawing:
         """Common setup tasks for new and loaded DXF drawings."""
         self.groups = GroupCollection(self)
         self.materials = MaterialCollection(self)
+        self.table_styles = TableStyleManager(self)
 
         self.mline_styles = MLineStyleCollection(self)
         # all required internal structures are ready

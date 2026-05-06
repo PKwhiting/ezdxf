@@ -217,9 +217,30 @@ complete content is stored in the first row. All cells contain strings.
     - ordered text cell content
     - a readable subset of explicit cell-local overrides such as text height
       and alignment
+    - linked block-cell attribute payloads through the associated `TABLECONTENT`
+      object, when present
+    - typed access to the associated `TABLESTYLE` object through the loaded
+      `TABLESTYLE` entity and the document collection `doc.table_styles`
+
+    The linked table content object itself is also loaded as a typed
+    `TABLECONTENT` object and can be queried from an `ACAD_TABLE` entity by the
+    helper methods added on the loaded table entity.
 
     Some visual text formatting, such as content color, can also be stored
     inline in the cell text payload itself, similar to MTEXT formatting codes.
+
+    Block-cell payloads can also be queried from loaded tables. For example,
+    if a block cell contains ATTDEF-backed values stored in linked table
+    content, the resolved tag/value mapping for a cell can be obtained by::
+
+        cell = acad_table.get_cell(2, 0)
+        attribs = acad_table.get_cell_block_attribs(2, 0)
+
+    If a text cell references a `FIELD` object by handle, the linked field can
+    be resolved from the loaded table as well::
+
+        field = acad_table.get_cell_field(0, 0)
+        primary_field = acad_table.get_cell_primary_field(0, 0)
 
 INSERT Entity - Block References
 --------------------------------
