@@ -207,8 +207,19 @@ complete content is stored in the first row. All cells contain strings.
 .. important::
 
     The ACAD_TABLE entity still has limited support compared to simpler DXF
-    entities. There is no support for adding a new ACAD_TABLE entity or
-    modifying its content.
+    entities, but the current support is no longer read-only.
+
+    Current authoring and modification support includes:
+
+    - creating text-only tables by :meth:`layout.add_table() <ezdxf.graphicsfactory.CreatorInterface.add_table>`
+    - updating text cell payloads by `set_cell_text()`
+    - updating text cell local text-height overrides by `set_cell_text_height()`
+    - updating text cell local alignment overrides by `set_cell_alignment()`
+    - updating text cell inline payload color formatting by `set_cell_content_color()`
+    - updating text cell local semantic color overrides by `set_cell_text_color()`
+
+    These mutation helpers rebuild the anonymous `*T` geometry block so the
+    visible block content stays in sync with the semantic `AcDbTable` shell.
 
     Current read support includes:
 
@@ -225,6 +236,14 @@ complete content is stored in the first row. All cells contain strings.
     The linked table content object itself is also loaded as a typed
     `TABLECONTENT` object and can be queried from an `ACAD_TABLE` entity by the
     helper methods added on the loaded table entity.
+    Readable linked row, column, and formatted cell wrapper structures are also
+    preserved in that typed `TABLECONTENT` layer.
+
+    For example::
+
+        linked_col = acad_table.get_linked_column(0)
+        linked_row = acad_table.get_linked_row(0)
+        linked_cell = acad_table.get_linked_cell(0, 0)
 
     Some visual text formatting, such as content color, can also be stored
     inline in the cell text payload itself, similar to MTEXT formatting codes.
@@ -241,6 +260,24 @@ complete content is stored in the first row. All cells contain strings.
 
         field = acad_table.get_cell_field(0, 0)
         primary_field = acad_table.get_cell_primary_field(0, 0)
+
+    The associated `TABLESTYLE` object and the default Title/Header/Data row
+    style buckets can also be resolved from a loaded table::
+
+        style = acad_table.get_table_style()
+        title_bucket = acad_table.get_row_style_bucket(0)
+
+    New documents also expose the `TABLESTYLE` object collection at
+    `doc.table_styles`.
+
+    Example authoring flow::
+
+        table = msp.add_table((0, 0), [["TITLE", "STATUS"], ["HEADER", "VALUE"]])
+        table.set_cell_text(1, 1, "VALUE-LONG")
+        table.set_cell_text_height(0, 0, 20.0)
+        table.set_cell_alignment(0, 1, 4)
+        table.set_cell_content_color(1, 0, 215, 10507177)
+        table.set_cell_text_color(0, 1, 217, 9643919)
 
 INSERT Entity - Block References
 --------------------------------

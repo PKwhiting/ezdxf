@@ -1,12 +1,13 @@
 # Copyright (c) 2019-2024 Manfred Moitzi
 # License: MIT License
 from __future__ import annotations
-from typing import TYPE_CHECKING, Iterable, Optional, Iterator
+from typing import TYPE_CHECKING, Iterable, Optional, Iterator, Sequence
 from typing_extensions import Self
 import copy
 from dataclasses import dataclass, field
 from ezdxf.math import Vec3, Matrix44
 from ezdxf.lldxf.tags import Tags, group_tags
+from ezdxf.tools.text import MTextEditor, plain_text
 from ezdxf.lldxf.attributes import (
     DXFAttr,
     DXFAttributes,
@@ -30,13 +31,17 @@ if TYPE_CHECKING:
 __all__ = [
     "AcadTable",
     "AcadTableBlockAttributeValue",
+    "AcadTableContentFormat",
     "AcadTableCell",
     "AcadTableData",
+    "AcadTableFormat",
     "TableStyleCellStyle",
     "TableStyleData",
     "AcadTableLinkedCell",
     "AcadTableLinkedCellContent",
+    "AcadTableLinkedColumn",
     "AcadTableLinkedData",
+    "AcadTableLinkedRow",
     "AcadTableBlockContent",
     "TableContent",
     "TableStyle",
@@ -46,11 +51,47 @@ __all__ = [
 ]
 
 
+CELL_OVERRIDE_BASE = 262144
+CELL_OVERRIDE_ALIGNMENT = 1
+CELL_OVERRIDE_LOCAL_COLOR = 2
+CELL_OVERRIDE_LOCAL_TRUE_COLOR = 4
+CELL_OVERRIDE_TEXT_HEIGHT = 32
+
+
 @dataclass
 class AcadTableBlockAttributeValue:
     handle: str
     text: str = ""
     index: int = 0
+
+
+@dataclass
+class AcadTableContentFormat:
+    flags90: int = 0
+    flags91: int = 0
+    flags92: int = 0
+    flags93: int = 0
+    format_string: str = ""
+    margin: float = 0.0
+    text_height: Optional[float] = None
+    unknown94: Optional[int] = None
+    color62: Optional[int] = None
+    style_handle: Optional[str] = None
+    block_scale: Optional[float] = None
+
+
+@dataclass
+class AcadTableFormat:
+    kind: str = ""
+    flags90: int = 0
+    alignment: Optional[int] = None
+    flags91: int = 0
+    flags92: int = 0
+    color62: Optional[int] = None
+    flags93: int = 0
+    table_cell_type171: Optional[int] = None
+    flags94: Optional[int] = None
+    content_format: Optional[AcadTableContentFormat] = None
 
 
 @dataclass
@@ -68,30 +109,103 @@ class AcadTableLinkedCellContent:
 
 
 @dataclass
+class AcadTableLinkedColumn:
+    index: int
+    width: float = 0.0
+    table_format: Optional[AcadTableFormat] = None
+
+
+@dataclass
+class AcadTableLinkedRow:
+    index: int
+    height: float = 0.0
+    table_format: Optional[AcadTableFormat] = None
+
+
+@dataclass
 class AcadTableLinkedCell:
     row: int
     col: int
     contents: list[AcadTableLinkedCellContent] = field(default_factory=list)
+    table_format: Optional[AcadTableFormat] = None
+    raw_table_flags90: Optional[int] = None
+    raw_table_flags91: Optional[int] = None
 
 
 @dataclass
 class AcadTableLinkedData:
     n_rows: int = 0
     n_cols: int = 0
+    columns: list[AcadTableLinkedColumn] = field(default_factory=list)
+    rows_meta: list[AcadTableLinkedRow] = field(default_factory=list)
     cells: list[AcadTableLinkedCell] = field(default_factory=list)
 
     @classmethod
     def from_tags(cls, tags: Tags, *, n_rows: int = 0, n_cols: int = 0) -> "AcadTableLinkedData":
         data = cls(n_rows=n_rows, n_cols=n_cols)
         cell_index = 0
+        row_index = 0
+        column_index = 0
         index = 0
         while index < len(tags):
             tag = tags[index]
+            if tag.code == 1 and tag.value == "FORMATTEDTABLEDATACOLUMN_BEGIN":
+                end = _find_marker_end(tags, index + 1, 309, "FORMATTEDTABLEDATACOLUMN_END")
+                table_format = _parse_table_format(Tags(tags[index : end + 1]))
+                if column_index < len(data.columns):
+                    data.columns[column_index].table_format = table_format
+                else:
+                    data.columns.append(AcadTableLinkedColumn(index=column_index, table_format=table_format))
+                index = end + 1
+                continue
+            if tag.code == 1 and tag.value == "TABLECOLUMN_BEGIN":
+                end = _find_marker_end(tags, index + 1, 309, "TABLECOLUMN_END")
+                column = _parse_linked_table_column(Tags(tags[index : end + 1]), column_index)
+                if column_index < len(data.columns):
+                    data.columns[column_index].width = column.width
+                else:
+                    data.columns.append(column)
+                column_index += 1
+                index = end + 1
+                continue
             if tag.code == 1 and tag.value == "LINKEDTABLEDATACELL_BEGIN":
                 end = _find_marker_end(tags, index + 1, 309, "LINKEDTABLEDATACELL_END")
                 cell_tags = Tags(tags[index : end + 1])
                 data.cells.append(_parse_linked_table_cell(cell_tags, cell_index, n_cols))
                 cell_index += 1
+                index = end + 1
+                continue
+            if tag.code == 1 and tag.value == "FORMATTEDTABLEDATACELL_BEGIN":
+                end = _find_marker_end(tags, index + 1, 309, "FORMATTEDTABLEDATACELL_END")
+                if len(data.cells):
+                    data.cells[-1].table_format = _parse_table_format(Tags(tags[index : end + 1]))
+                index = end + 1
+                continue
+            if tag.code == 1 and tag.value == "TABLECELL_BEGIN":
+                end = _find_marker_end(tags, index + 1, 309, "TABLECELL_END")
+                if len(data.cells):
+                    raw90, raw91 = _parse_table_cell_wrapper(Tags(tags[index : end + 1]))
+                    data.cells[-1].raw_table_flags90 = raw90
+                    data.cells[-1].raw_table_flags91 = raw91
+                index = end + 1
+                continue
+            if tag.code == 1 and tag.value == "FORMATTEDTABLEDATAROW_BEGIN":
+                end = _find_marker_end(tags, index + 1, 309, "FORMATTEDTABLEDATAROW_END")
+                table_format = _parse_table_format(Tags(tags[index : end + 1]))
+                if row_index < len(data.rows_meta):
+                    data.rows_meta[row_index].table_format = table_format
+                else:
+                    data.rows_meta.append(AcadTableLinkedRow(index=row_index, table_format=table_format))
+                index = end + 1
+                continue
+            if tag.code == 1 and tag.value == "TABLEROW_BEGIN":
+                end = _find_marker_end(tags, index + 1, 309, "TABLEROW_END")
+                row = _parse_linked_table_row(Tags(tags[index : end + 1]), row_index)
+                if row_index < len(data.rows_meta):
+                    data.rows_meta[row_index].height = row.height
+                else:
+                    data.rows_meta.append(row)
+                row_index += 1
                 index = end + 1
                 continue
             index += 1
@@ -105,6 +219,16 @@ class AcadTableLinkedData:
             start = index * self.n_cols
             rows.append(self.cells[start : start + self.n_cols])
         return rows
+
+    def get_cell(self, row: int, col: int) -> AcadTableLinkedCell:
+        index = row * max(self.n_cols, 1) + col
+        return self.cells[index]
+
+    def get_row(self, row: int) -> AcadTableLinkedRow:
+        return self.rows_meta[row]
+
+    def get_column(self, col: int) -> AcadTableLinkedColumn:
+        return self.columns[col]
 
 
 @dataclass
@@ -150,6 +274,85 @@ class AcadTableCell:
     @property
     def has_field(self) -> bool:
         return self.field_handle is not None
+
+    def set_text_height(self, value: Optional[float]) -> None:
+        if value is None:
+            self.text_height = None
+            self.override_flags &= ~CELL_OVERRIDE_TEXT_HEIGHT
+        else:
+            value = float(value)
+            if value <= 0.0:
+                raise const.DXFValueError("text height has to be greater than 0")
+            self.text_height = value
+            self.override_flags |= CELL_OVERRIDE_BASE | CELL_OVERRIDE_TEXT_HEIGHT
+
+    def set_alignment(self, value: Optional[int]) -> None:
+        if value is None:
+            self.alignment = None
+            self.override_flags &= ~CELL_OVERRIDE_ALIGNMENT
+        else:
+            value = int(value)
+            if value < 1 or value > 9:
+                raise const.DXFValueError("alignment has to be in range 1..9")
+            self.alignment = value
+            self.override_flags |= CELL_OVERRIDE_BASE | CELL_OVERRIDE_ALIGNMENT
+
+    def set_content_color(
+        self, aci: Optional[int], true_color: Optional[int] = None
+    ) -> None:
+        content = plain_text(self.text)
+        if aci is None:
+            self.text = content
+            self.content_color = None
+            return
+        aci = int(aci)
+        if aci < 0 or aci > 256:
+            raise const.DXFValueError("ACI color has to be in range 0..256")
+        editor = MTextEditor().aci(aci)
+        if true_color is not None:
+            true_color = int(true_color)
+            if true_color < 0:
+                raise const.DXFValueError("true color has to be greater than 0")
+            editor.append(rf"\c{true_color};")
+        editor.append(content)
+        self.text = "{" + str(editor) + "}"
+        self.content_color = aci
+
+    def set_text_content(self, text: str) -> None:
+        self.text = str(text)
+
+    def set_text_color(
+        self, aci: Optional[int], true_color: Optional[int] = None
+    ) -> None:
+        if aci is None and true_color is None:
+            self.fill_color = None
+            self.fill_true_color = None
+            self.fill_enabled = None
+            self.override_flags &= ~(
+                CELL_OVERRIDE_LOCAL_COLOR | CELL_OVERRIDE_LOCAL_TRUE_COLOR
+            )
+            return
+        if aci is None:
+            raise const.DXFValueError(
+                "ACI color is required for local text color override"
+            )
+        aci = int(aci)
+        if aci < 0 or aci > 256:
+            raise const.DXFValueError("ACI color has to be in range 0..256")
+        self.fill_color = aci
+        self.fill_enabled = 0
+        self.override_flags |= CELL_OVERRIDE_BASE | CELL_OVERRIDE_LOCAL_COLOR
+        if true_color is None:
+            self.fill_true_color = None
+            self.override_flags &= ~CELL_OVERRIDE_LOCAL_TRUE_COLOR
+        else:
+            true_color = int(true_color)
+            if true_color < 0:
+                raise const.DXFValueError(
+                    "true color has to be greater than or equal to 0"
+                )
+            self.fill_true_color = true_color
+            self.override_flags |= CELL_OVERRIDE_LOCAL_TRUE_COLOR
 
 
 @dataclass
@@ -361,6 +564,94 @@ def _find_marker_end(tags: Tags, start: int, end_code: int, end_value: str) -> i
     raise const.DXFStructureError(f"missing marker end tag: {end_value}")
 
 
+def _parse_content_format(tags: Tags) -> AcadTableContentFormat:
+    content = AcadTableContentFormat()
+    for code, value in tags:
+        if code == 90 and content.flags90 == 0:
+            content.flags90 = int(value)
+        elif code == 91:
+            content.flags91 = int(value)
+        elif code == 92:
+            content.flags92 = int(value)
+        elif code == 93:
+            content.flags93 = int(value)
+        elif code == 300 and not content.format_string and value not in ("CONTENTFORMAT", ""):
+            content.format_string = str(value)
+        elif code == 40:
+            content.margin = float(value)
+        elif code == 140:
+            content.text_height = float(value)
+        elif code == 94:
+            content.unknown94 = int(value)
+        elif code == 62:
+            content.color62 = int(value)
+        elif code == 340:
+            content.style_handle = str(value)
+        elif code == 144:
+            content.block_scale = float(value)
+    return content
+
+
+def _parse_table_format(tags: Tags) -> AcadTableFormat:
+    table = AcadTableFormat()
+    index = 0
+    while index < len(tags):
+        code, value = tags[index]
+        if code == 300 and value in ("COLUMNTABLEFORMAT", "ROWTABLEFORMAT", "CELLTABLEFORMAT"):
+            table.kind = str(value)
+        elif code == 90 and table.flags90 == 0:
+            table.flags90 = int(value)
+        elif code == 170 and table.alignment is None:
+            table.alignment = int(value)
+        elif code == 91:
+            table.flags91 = int(value)
+        elif code == 92:
+            table.flags92 = int(value)
+        elif code == 62:
+            table.color62 = int(value)
+        elif code == 93:
+            table.flags93 = int(value)
+        elif code == 171:
+            table.table_cell_type171 = int(value)
+        elif code == 94:
+            table.flags94 = int(value)
+        elif code == 1 and tags[index].value == "CONTENTFORMAT_BEGIN":
+            end = _find_marker_end(tags, index + 1, 309, "CONTENTFORMAT_END")
+            table.content_format = _parse_content_format(Tags(tags[index : end + 1]))
+            index = end
+        index += 1
+    return table
+
+
+def _parse_linked_table_column(tags: Tags, index: int) -> AcadTableLinkedColumn:
+    column = AcadTableLinkedColumn(index=index)
+    for code, value in tags:
+        if code == 40:
+            column.width = float(value)
+            break
+    return column
+
+
+def _parse_linked_table_row(tags: Tags, index: int) -> AcadTableLinkedRow:
+    row = AcadTableLinkedRow(index=index)
+    for code, value in tags:
+        if code == 40:
+            row.height = float(value)
+            break
+    return row
+
+
+def _parse_table_cell_wrapper(tags: Tags) -> tuple[Optional[int], Optional[int]]:
+    raw90: Optional[int] = None
+    raw91: Optional[int] = None
+    for code, value in tags:
+        if code == 90 and raw90 is None:
+            raw90 = int(value)
+        elif code == 91 and raw91 is None:
+            raw91 = int(value)
+    return raw90, raw91
+
+
 def _parse_linked_table_cell(tags: Tags, cell_index: int, n_cols: int) -> AcadTableLinkedCell:
     row = cell_index // n_cols if n_cols else 0
     col = cell_index % n_cols if n_cols else cell_index
@@ -493,6 +784,90 @@ def _parse_table_style(tags: Tags) -> TableStyleData:
 
     data.trailing_tags = Tags(tags[index:])
     return data
+
+
+def _default_table_style_data() -> TableStyleData:
+    def make_style(text_height: float, alignment: int) -> TableStyleCellStyle:
+        return TableStyleCellStyle(
+            text_style="Standard",
+            text_height=text_height,
+            alignment=alignment,
+            text_color=0,
+            fill_color=7,
+            fill_enabled=0,
+            data_type=512,
+            unit_type=0,
+            format_string="",
+            border_lineweights={
+                "top": -2,
+                "right": -2,
+                "bottom": -2,
+                "left": -2,
+                "vertical": -2,
+                "horizontal": -2,
+            },
+            border_visibility={
+                "top": 1,
+                "right": 1,
+                "bottom": 1,
+                "left": 1,
+                "vertical": 1,
+                "horizontal": 1,
+            },
+            border_colors={
+                "top": 0,
+                "right": 0,
+                "bottom": 0,
+                "left": 0,
+                "vertical": 0,
+                "horizontal": 0,
+            },
+        )
+
+    return TableStyleData(
+        flow_direction=0,
+        flags=0,
+        horizontal_cell_margin=1.5,
+        vertical_cell_margin=1.5,
+        suppress_title=0,
+        suppress_column_header=0,
+        cell_styles=[
+            make_style(4.5, 2),
+            make_style(6.0, 5),
+            make_style(4.5, 5),
+        ],
+    )
+
+
+def _export_table_style_data(tagwriter: AbstractTagWriter, data: TableStyleData) -> None:
+    def export_cell_style(cell_style: TableStyleCellStyle) -> None:
+        write_tag2(7, cell_style.text_style)
+        write_tag2(140, cell_style.text_height)
+        write_tag2(170, cell_style.alignment)
+        write_tag2(62, cell_style.text_color)
+        write_tag2(63, cell_style.fill_color)
+        write_tag2(283, cell_style.fill_enabled)
+        write_tag2(90, cell_style.data_type)
+        write_tag2(91, cell_style.unit_type)
+        write_tag2(1, cell_style.format_string)
+        for code, name in ((274, "top"), (275, "right"), (276, "bottom"), (277, "left"), (278, "vertical"), (279, "horizontal")):
+            write_tag2(code, cell_style.border_lineweights.get(name, -2))
+            write_tag2(code + 10, cell_style.border_visibility.get(name, 1))
+            color_code = 64 if code == 274 else 65 if code == 275 else 66 if code == 276 else 67 if code == 277 else 68 if code == 278 else 69
+            write_tag2(color_code, cell_style.border_colors.get(name, 0))
+
+    write_tag2 = tagwriter.write_tag2
+    write_tag2(280, 0)
+    write_tag2(70, data.flow_direction)
+    write_tag2(71, data.flags)
+    write_tag2(40, data.horizontal_cell_margin)
+    write_tag2(41, data.vertical_cell_margin)
+    write_tag2(280, data.suppress_title)
+    write_tag2(281, data.suppress_column_header)
+    for cell_style in data.cell_styles:
+        export_cell_style(cell_style)
+    if len(data.trailing_tags):
+        tagwriter.write_tags(data.trailing_tags)
 
 
 acdb_block_reference = DefSubclass(
@@ -854,6 +1229,15 @@ class TableStyle(DXFObject):
             self.data = _parse_table_style(tags)
         return dxf
 
+    def export_entity(self, tagwriter: AbstractTagWriter) -> None:
+        super().export_entity(tagwriter)
+        tagwriter.write_tag2(const.SUBCLASS_MARKER, acdb_table_style.name)
+        self.dxf.export_dxf_attribs(tagwriter, ["name"])
+        if self.data is None:
+            _export_table_style_data(tagwriter, _default_table_style_data())
+        else:
+            _export_table_style_data(tagwriter, self.data)
+
     @property
     def title_style(self) -> Optional[TableStyleCellStyle]:
         return self.data.title_style if self.data is not None else None
@@ -870,6 +1254,11 @@ class TableStyle(DXFObject):
 class TableStyleManager(ObjectCollection[TableStyle]):
     def __init__(self, doc: Drawing):
         super().__init__(doc, dict_name="ACAD_TABLESTYLE", object_type="TABLESTYLE")
+
+    def create_required_entries(self) -> None:
+        if "Standard" not in self:
+            style = self.new("Standard")
+            style.data = _default_table_style_data()
 
 
 @factory.register_entity
@@ -895,11 +1284,20 @@ class TableContent(DXFTagStorage):
             return []
         return self.linked_data.rows()
 
+    def get_row(self, row: int) -> AcadTableLinkedRow:
+        if self.linked_data is None:
+            raise IndexError("TABLECONTENT has no parsed row data")
+        return self.linked_data.get_row(row)
+
+    def get_column(self, col: int) -> AcadTableLinkedColumn:
+        if self.linked_data is None:
+            raise IndexError("TABLECONTENT has no parsed column data")
+        return self.linked_data.get_column(col)
+
     def get_cell(self, row: int, col: int) -> AcadTableLinkedCell:
         if self.linked_data is None:
             raise IndexError("TABLECONTENT has no parsed cell data")
-        index = row * max(self.linked_data.n_cols, 1) + col
-        return self.linked_data.cells[index]
+        return self.linked_data.get_cell(row, col)
 
 
 @factory.register_entity
@@ -914,6 +1312,224 @@ class AcadTableBlockContent(DXFTagStorage):
         self.data: Optional[AcadTableData] = None
         self.linked_data: Optional[AcadTableLinkedData] = None
 
+    @property
+    def is_graphic_entity(self) -> bool:
+        return True
+
+    def setup_text_table(
+        self,
+        insert: Vec3,
+        content: Sequence[Sequence[str]],
+        *,
+        style_name: str = "Standard",
+        row_heights: Optional[Sequence[float]] = None,
+        col_widths: Optional[Sequence[float]] = None,
+    ) -> None:
+        if self.doc is None:
+            raise const.DXFStructureError("ACAD_TABLE requires a valid DXF document")
+        rows = [list(row) for row in content]
+        if not rows:
+            raise const.DXFValueError("ACAD_TABLE requires at least one row")
+        n_cols = len(rows[0])
+        if n_cols == 0:
+            raise const.DXFValueError("ACAD_TABLE requires at least one column")
+        for row in rows:
+            if len(row) != n_cols:
+                raise const.DXFValueError("ACAD_TABLE content has inconsistent row lengths")
+
+        n_rows = len(rows)
+        if row_heights is None:
+            if n_rows >= 3:
+                heights = [11.0, 9.0] + [9.0] * (n_rows - 2)
+                suppress_title = 0
+                suppress_header = 0
+            elif n_rows == 2:
+                heights = [9.0, 9.0]
+                suppress_title = 1
+                suppress_header = 0
+            else:
+                heights = [9.0]
+                suppress_title = 1
+                suppress_header = 1
+        else:
+            heights = [float(h) for h in row_heights]
+            if len(heights) != n_rows:
+                raise const.DXFValueError("row_heights count does not match content rows")
+            suppress_title = 0 if n_rows >= 3 else 1
+            suppress_header = 0 if n_rows >= 2 else 1
+
+        if col_widths is None:
+            widths = [63.5] * n_cols
+        else:
+            widths = [float(w) for w in col_widths]
+            if len(widths) != n_cols:
+                raise const.DXFValueError("col_widths count does not match content columns")
+
+        style = self.doc.table_styles.get(style_name)
+        if style is None:
+            raise const.DXFValueError(f"TABLESTYLE '{style_name}' does not exist")
+
+        cells: list[AcadTableCell] = []
+        for row_index, row in enumerate(rows):
+            for col_index, value in enumerate(row):
+                cells.append(
+                    AcadTableCell(
+                        row=row_index,
+                        col=col_index,
+                        cell_type=1,
+                        flags=0,
+                        merged_value=0,
+                        autofit_flag=0,
+                        border_width=1,
+                        border_height=1,
+                        override_flags=CELL_OVERRIDE_BASE,
+                        virtual_edge_flag=0,
+                        rotation=0.0,
+                        text=str(value),
+                    )
+                )
+
+        self.data = AcadTableData(
+            n_rows=n_rows,
+            n_cols=n_cols,
+            row_heights=heights,
+            col_widths=widths,
+            cells=cells,
+            suppress_title=suppress_title,
+            suppress_column_header=suppress_header,
+        )
+
+        self.dxf.version = 0
+        self.dxf.table_style_id = style.dxf.handle
+        self.dxf.horizontal_direction = Vec3(1, 0, 0)
+        self.dxf.table_value = 22
+        self.dxf.n_rows = n_rows
+        self.dxf.n_cols = n_cols
+        self.dxf.override_flag = 0
+        self.dxf.border_color_override_flag = 0
+        self.dxf.border_lineweight_override_flag = 0
+        self.dxf.border_visibility_override_flag = 0
+        self.dxf.insert = Vec3(insert)
+
+        block = self.doc.blocks.new_anonymous_block(type_char="T")
+        self.dxf.geometry = block.name
+        self.dxf.block_record_handle = block.block_record_handle
+        self._build_text_table_geometry(block, style)
+
+    def _build_text_table_geometry(self, block, style: TableStyle) -> None:
+        assert self.data is not None
+        widths = self.data.col_widths
+        heights = self.data.row_heights
+        total_width = sum(widths)
+        y = 0.0
+        block.add_line((0, 0), (total_width, 0))
+        for height in heights:
+            y -= height
+            block.add_line((0, y), (total_width, y))
+        x = 0.0
+        block.add_line((0, 0), (0, -sum(heights)))
+        for width in widths:
+            x += width
+            block.add_line((x, 0), (x, -sum(heights)))
+
+        for cell in self.data.cells:
+            style_bucket = self.get_row_style_bucket(cell.row) if style is not None else None
+            self._add_cell_mtext(block, cell, style_bucket)
+
+    def _add_cell_mtext(self, block, cell: AcadTableCell, style_bucket: Optional[TableStyleCellStyle]) -> None:
+        assert self.data is not None
+        widths = self.data.col_widths
+        heights = self.data.row_heights
+        x0 = sum(widths[: cell.col])
+        y0 = -sum(heights[: cell.row])
+        width = widths[cell.col]
+        height = heights[cell.row]
+        margin_x = 1.5
+        margin_y = 1.5
+        attachment = cell.alignment
+        if attachment is None:
+            attachment = style_bucket.alignment if style_bucket is not None else 5
+        char_height = cell.text_height
+        if char_height is None:
+            char_height = style_bucket.text_height if style_bucket is not None else 4.5
+        insert = _table_cell_insert(
+            x0,
+            y0,
+            width,
+            height,
+            attachment,
+            margin_x,
+            margin_y,
+        )
+        text_style = cell.text_style
+        if text_style is None:
+            text_style = style_bucket.text_style if style_bucket is not None else "Standard"
+        mtext = block.add_mtext(
+            cell.text,
+            dxfattribs={
+                "insert": insert,
+                "char_height": char_height,
+                "width": max(width - margin_x * 2.0, 0.0),
+                "style": text_style,
+                "attachment_point": attachment,
+            },
+        )
+        if cell.fill_color is not None:
+            mtext.dxf.color = cell.fill_color
+        else:
+            mtext.dxf.color = 0
+        if cell.fill_true_color is not None:
+            mtext.dxf.true_color = cell.fill_true_color
+
+    def rebuild_text_table_geometry(self) -> None:
+        if self.doc is None or self.data is None:
+            return
+        block_name = self.dxf.get("geometry")
+        if not block_name:
+            return
+        block = self.doc.blocks.get(block_name)
+        if block is None:
+            return
+        style = self.get_table_style()
+        if style is None:
+            raise const.DXFStructureError("ACAD_TABLE requires a valid TABLESTYLE")
+        block.delete_all_entities()
+        self._build_text_table_geometry(block, style)
+
+    def set_cell_text_height(self, row: int, col: int, value: Optional[float]) -> AcadTableCell:
+        cell = self.get_cell(row, col)
+        cell.set_text_height(value)
+        self.rebuild_text_table_geometry()
+        return cell
+
+    def set_cell_alignment(self, row: int, col: int, value: Optional[int]) -> AcadTableCell:
+        cell = self.get_cell(row, col)
+        cell.set_alignment(value)
+        self.rebuild_text_table_geometry()
+        return cell
+
+    def set_cell_content_color(
+        self, row: int, col: int, aci: Optional[int], true_color: Optional[int] = None
+    ) -> AcadTableCell:
+        cell = self.get_cell(row, col)
+        cell.set_content_color(aci, true_color)
+        self.rebuild_text_table_geometry()
+        return cell
+
+    def set_cell_text(self, row: int, col: int, text: str) -> AcadTableCell:
+        cell = self.get_cell(row, col)
+        cell.set_text_content(text)
+        self.rebuild_text_table_geometry()
+        return cell
+
+    def set_cell_text_color(
+        self, row: int, col: int, aci: Optional[int], true_color: Optional[int] = None
+    ) -> AcadTableCell:
+        cell = self.get_cell(row, col)
+        cell.set_text_color(aci, true_color)
+        self.rebuild_text_table_geometry()
+        return cell
+
     def load_dxf_attribs(
         self, processor: Optional[SubclassProcessor] = None
     ) -> DXFNamespace:
@@ -926,6 +1542,82 @@ class AcadTableBlockContent(DXFTagStorage):
             if tags is not None:
                 self.data = _parse_acad_table_content(dxf, tags)
         return dxf
+
+    def export_entity(self, tagwriter: AbstractTagWriter) -> None:
+        if len(self.xtags.subclasses) > 1:
+            super().export_entity(tagwriter)
+            return
+
+        self.export_acdb_entity(tagwriter)
+        tagwriter.write_tag2(const.SUBCLASS_MARKER, acdb_block_reference.name)
+        self.dxf.export_dxf_attribs(tagwriter, ["geometry", "insert"])
+        tagwriter.write_tag2(const.SUBCLASS_MARKER, acdb_table.name)
+        self.export_table(tagwriter)
+
+    def export_acdb_entity(self, tagwriter: AbstractTagWriter) -> None:
+        if tagwriter.dxfversion > const.DXF12:
+            tagwriter.write_tag2(const.SUBCLASS_MARKER, acdb_entity.name)
+        self.dxf.export_dxf_attribs(tagwriter, ["paperspace", "layer", "color", "lineweight"])
+
+    def export_table(self, tagwriter: AbstractTagWriter) -> None:
+        if self.data is None:
+            return
+        write_tag2 = tagwriter.write_tag2
+        dxf = self.dxf
+        write_tag2(280, dxf.version)
+        write_tag2(342, dxf.table_style_id)
+        write_tag2(343, dxf.block_record_handle)
+        tagwriter.write_vertex(11, dxf.horizontal_direction)
+        write_tag2(90, dxf.table_value)
+        write_tag2(91, self.data.n_rows)
+        write_tag2(92, self.data.n_cols)
+        write_tag2(93, dxf.override_flag)
+        write_tag2(94, dxf.border_color_override_flag)
+        write_tag2(95, dxf.border_lineweight_override_flag)
+        write_tag2(96, dxf.border_visibility_override_flag)
+        write_tag2(280, self.data.suppress_title or 0)
+        write_tag2(281, self.data.suppress_column_header or 0)
+        for value in self.data.row_heights:
+            write_tag2(141, value)
+        for value in self.data.col_widths:
+            write_tag2(142, value)
+        for cell in self.data.cells:
+            write_tag2(171, cell.cell_type)
+            write_tag2(172, cell.flags)
+            write_tag2(173, cell.merged_value)
+            write_tag2(174, cell.autofit_flag)
+            write_tag2(175, cell.border_width)
+            write_tag2(176, cell.border_height)
+            write_tag2(91, _export_cell_override_flags(cell))
+            write_tag2(178, cell.virtual_edge_flag)
+            write_tag2(145, cell.rotation)
+            if cell.text_height is not None:
+                write_tag2(140, cell.text_height)
+            if cell.alignment is not None:
+                write_tag2(170, cell.alignment)
+            if cell.fill_color is not None:
+                write_tag2(63, cell.fill_color)
+            if cell.fill_true_color is not None:
+                write_tag2(421, cell.fill_true_color)
+            if cell.fill_enabled is not None:
+                write_tag2(283, cell.fill_enabled)
+            write_tag2(92, 0)
+            write_tag2(301, "CELL_VALUE")
+            write_tag2(93, 6)
+            write_tag2(90, 4)
+            write_tag2(1, cell.text)
+            write_tag2(94, 0)
+            write_tag2(300, "")
+            write_tag2(302, cell.text)
+            write_tag2(304, "ACVALUE_END")
+
+    def __referenced_blocks__(self) -> Iterable[str]:
+        """Support for the "ReferencedBlocks" protocol."""
+        if self.doc:
+            block_record_handle = self.dxf.get("block_record_handle", None)
+            if block_record_handle:
+                return (block_record_handle,)
+        return tuple()
 
     def rows(self) -> list[list[AcadTableCell]]:
         if self.data is None:
@@ -971,6 +1663,52 @@ class AcadTableBlockContent(DXFTagStorage):
         if field.is_text_wrapper and len(child_fields):
             return child_fields[0]
         return field
+
+    def get_table_style(self) -> Optional[TableStyle]:
+        if self.doc is None:
+            return None
+        handle = self.dxf.get("table_style_id")
+        if handle is None:
+            return None
+        style = self.doc.entitydb.get(handle)
+        return style if isinstance(style, TableStyle) and style.is_alive else None
+
+    def get_row_style_bucket(self, row: int) -> Optional[TableStyleCellStyle]:
+        style = self.get_table_style()
+        if style is None or style.data is None:
+            return None
+        suppress_title = bool(self.data.suppress_title) if self.data is not None and self.data.suppress_title is not None else bool(style.data.suppress_title)
+        suppress_header = bool(self.data.suppress_column_header) if self.data is not None and self.data.suppress_column_header is not None else bool(style.data.suppress_column_header)
+
+        if not suppress_title:
+            if row == 0:
+                return style.title_style
+            row -= 1
+        if not suppress_header:
+            if row == 0:
+                return style.header_style
+        return style.data_style
+
+    def get_cell_style_bucket(self, row: int, col: int) -> Optional[TableStyleCellStyle]:
+        return self.get_row_style_bucket(row)
+
+    def get_linked_row(self, row: int) -> AcadTableLinkedRow:
+        linked = self.load_linked_data()
+        if linked is None:
+            raise IndexError("ACAD_TABLE has no linked row data")
+        return linked.get_row(row)
+
+    def get_linked_column(self, col: int) -> AcadTableLinkedColumn:
+        linked = self.load_linked_data()
+        if linked is None:
+            raise IndexError("ACAD_TABLE has no linked column data")
+        return linked.get_column(col)
+
+    def get_linked_cell(self, row: int, col: int) -> AcadTableLinkedCell:
+        linked = self.load_linked_data()
+        if linked is None:
+            raise IndexError("ACAD_TABLE has no linked cell data")
+        return linked.get_cell(row, col)
 
     def resolve_block_attribute_tags(self, cell: AcadTableCell) -> dict[str, str]:
         if self.doc is None or not cell.block_attributes:
@@ -1163,3 +1901,49 @@ def _load_table_values(tags: Tags, split_code: int) -> list[str]:
             s = "".join(tag.value for tag in g_tags if 1 <= tag.code <= 3)
             values.append(s)
     return values
+
+
+def _export_cell_override_flags(cell: AcadTableCell) -> int:
+    flags = cell.override_flags | CELL_OVERRIDE_BASE
+    if cell.text_height is not None:
+        flags |= CELL_OVERRIDE_TEXT_HEIGHT
+    else:
+        flags &= ~CELL_OVERRIDE_TEXT_HEIGHT
+    if cell.alignment is not None:
+        flags |= CELL_OVERRIDE_ALIGNMENT
+    else:
+        flags &= ~CELL_OVERRIDE_ALIGNMENT
+    if cell.fill_color is not None:
+        flags |= CELL_OVERRIDE_LOCAL_COLOR
+    else:
+        flags &= ~CELL_OVERRIDE_LOCAL_COLOR
+    if cell.fill_true_color is not None:
+        flags |= CELL_OVERRIDE_LOCAL_TRUE_COLOR
+    else:
+        flags &= ~CELL_OVERRIDE_LOCAL_TRUE_COLOR
+    return flags
+
+
+def _table_cell_insert(
+    x0: float,
+    y0: float,
+    width: float,
+    height: float,
+    attachment: int,
+    margin_x: float,
+    margin_y: float,
+) -> tuple[float, float, float]:
+    if attachment in (2, 5, 8):
+        x = x0 + width * 0.5
+    elif attachment in (3, 6, 9):
+        x = x0 + width - margin_x
+    else:
+        x = x0 + margin_x
+
+    if attachment in (4, 5, 6):
+        y = y0 - height * 0.5
+    elif attachment in (7, 8, 9):
+        y = y0 - height + margin_y
+    else:
+        y = y0 - margin_y
+    return x, y, 0.0

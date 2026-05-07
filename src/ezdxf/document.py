@@ -201,6 +201,7 @@ class Drawing:
         self.groups = GroupCollection(self)
         self.materials = MaterialCollection(self)
         self.table_styles = TableStyleManager(self)
+        self.table_styles.create_required_entries()
 
         self.mline_styles = MLineStyleCollection(self)
         # all required internal structures are ready

@@ -73,6 +73,7 @@ if TYPE_CHECKING:
         XLine,
         MultiLeader,
         Helix,
+        AcadTableBlockContent,
     )
     from ezdxf.render.mleader import (
         MultiLeaderMTextBuilder,
@@ -964,6 +965,47 @@ class CreatorInterface:
             register_field_list=register_field_list,
         )
         return mtext
+
+    def add_table(
+        self,
+        insert: UVec,
+        content: Sequence[Sequence[str]],
+        *,
+        style_name: str = "Standard",
+        row_heights: Optional[Sequence[float]] = None,
+        col_widths: Optional[Sequence[float]] = None,
+        dxfattribs=None,
+    ) -> AcadTableBlockContent:
+        """Add a text-only :class:`~ezdxf.entities.ACAD_TABLE` entity.
+
+        The current writer creates a semantic table shell and the anonymous
+        ``*T`` geometry block used for visible table graphics.
+
+        Args:
+            insert: insertion point in :ref:`WCS`
+            content: table content as rows of cell strings
+            style_name: existing TABLESTYLE name, default is ``"Standard"``
+            row_heights: optional explicit row heights, one value per row
+            col_widths: optional explicit column widths, one value per column
+            dxfattribs: additional DXF attributes
+
+        """
+        if self.dxfversion < const.DXF2007:
+            raise DXFVersionError("ACAD_TABLE requires DXF R2007")
+        dxfattribs = dict(dxfattribs or {})
+        table = cast(
+            "AcadTableBlockContent",
+            factory.new("ACAD_TABLE", dxfattribs=dxfattribs, doc=self.doc),
+        )
+        table.setup_text_table(
+            Vec3(insert),
+            content,
+            style_name=style_name,
+            row_heights=row_heights,
+            col_widths=col_widths,
+        )
+        self.add_entity(table)
+        return table
 
     def add_mtext_static_columns(
         self,

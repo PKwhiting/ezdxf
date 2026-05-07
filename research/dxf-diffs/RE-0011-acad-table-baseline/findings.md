@@ -37,6 +37,7 @@ cache content. A useful first typed support tier does not need full table-style
     - repeated `330` ATTDEF handle
     - `301` attribute text value
     - repeated `92` index markers
+11. The same linked table-content object also stores readable row, column, and formatted table/cell wrapper structures such as `TABLECOLUMN_BEGIN`, `TABLEROW_BEGIN`, `FORMATTEDTABLEDATACELL_BEGIN`, and nested `CONTENTFORMAT_BEGIN` sections.
 
 ## Key Excerpts
 

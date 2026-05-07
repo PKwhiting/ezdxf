@@ -25,13 +25,21 @@
 		- reads linked `TABLECONTENT` payloads for richer block-cell content, including ATTDEF-backed block-cell attribute values when present
 		- resolves ATTDEF-backed block-cell attribute payloads back to tag/value dictionaries for loaded tables
 		- resolves text-cell `FIELD` handles back to loaded `FIELD` objects when present
+	- NEW: experimental text-only `ACAD_TABLE` authoring support
+		- adds `layout.add_table()` for text-only tables backed by an anonymous `*T` geometry block
+		- adds text-cell mutation helpers: `set_cell_text()`, `set_cell_text_height()`, `set_cell_alignment()`, `set_cell_content_color()`, and `set_cell_text_color()`
+		- validated by AutoCAD/Core Console roundtrip artifacts for the minimal writer, local text-height and alignment overrides, inline payload color formatting, and local semantic text-color overrides
 	- NEW: initial typed `TABLESTYLE` read support
 		- registers and loads real `TABLESTYLE` objects instead of falling back to raw tag storage
 		- exposes `doc.table_styles`
 		- parses the title/header/data style buckets and key readable defaults
+		- resolves loaded `ACAD_TABLE` entities back to their associated `TABLESTYLE` object and row-style buckets
+		- creates the required default `Standard` TABLESTYLE in new documents
 	- NEW: initial typed `TABLECONTENT` read support
 		- loads linked table-content objects as typed entities instead of opaque raw tag storage
 		- parses linked table-cell payloads for richer block-cell content
+		- parses linked row, column, and formatted cell wrapper structures
+		- exposes direct row, column, and cell wrapper accessors on loaded tables
 	- NEW: initial automatic `AcObjProp` inference support for common cases
 		- `LINE.Length`
 		- `CIRCLE.Radius`
