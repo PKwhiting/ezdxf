@@ -66,7 +66,9 @@
 		- resolves text-cell `FIELD` handles when present
 	- Experimental text-only `ACAD_TABLE` authoring support:
 		- adds `layout.add_table()` for text-only tables
-		- adds text-cell mutation helpers for text content, text height, alignment, inline payload color, and local semantic text color
+		- adds table-layout mutation helpers for row height, column width, and title/header suppression
+		- adds text-cell mutation helpers for text content, text height, alignment, text style, inline payload color, local fill/background overrides, and explicit fill disable/enable-state helpers
+		- keeps `set_cell_text_color()` as a compatibility alias for that validated fill override surface
 		- validated by AutoCAD/Core Console roundtrip artifacts
 	- Initial typed `TABLESTYLE` read support:
 		- loads real `TABLESTYLE` objects

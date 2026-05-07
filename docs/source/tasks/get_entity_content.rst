@@ -212,11 +212,15 @@ complete content is stored in the first row. All cells contain strings.
     Current authoring and modification support includes:
 
     - creating text-only tables by :meth:`layout.add_table() <ezdxf.graphicsfactory.CreatorInterface.add_table>`
+    - resizing authored rows and columns by `set_row_height()` and `set_col_width()`
+    - toggling title/header row semantics by `set_title_suppressed()` and `set_column_header_suppressed()`
     - updating text cell payloads by `set_cell_text()`
     - updating text cell local text-height overrides by `set_cell_text_height()`
     - updating text cell local alignment overrides by `set_cell_alignment()`
+    - updating text cell local text-style overrides by `set_cell_text_style()`
     - updating text cell inline payload color formatting by `set_cell_content_color()`
-    - updating text cell local semantic color overrides by `set_cell_text_color()`
+    - updating text cell local fill/background overrides by `set_cell_fill_color()`
+    - disabling text cell local fill/background by `clear_cell_fill()` or `set_cell_fill_enabled(..., False)`
 
     These mutation helpers rebuild the anonymous `*T` geometry block so the
     visible block content stays in sync with the semantic `AcDbTable` shell.
@@ -274,10 +278,15 @@ complete content is stored in the first row. All cells contain strings.
 
         table = msp.add_table((0, 0), [["TITLE", "STATUS"], ["HEADER", "VALUE"]])
         table.set_cell_text(1, 1, "VALUE-LONG")
+        table.set_col_width(1, 28.0)
+        table.set_row_height(0, 20.0)
+        table.set_title_suppressed(True)
         table.set_cell_text_height(0, 0, 20.0)
         table.set_cell_alignment(0, 1, 4)
+        table.set_cell_text_style(1, 0, "TABLE_ALT")
         table.set_cell_content_color(1, 0, 215, 10507177)
-        table.set_cell_text_color(0, 1, 217, 9643919)
+        table.set_cell_fill_color(0, 1, 217, 9643919)
+        table.clear_cell_fill(0, 1)
 
 INSERT Entity - Block References
 --------------------------------

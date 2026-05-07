@@ -204,11 +204,32 @@ ALIGNMENT_OVERRIDE_TABLE = make_table(
     first_cell_extra="170\n4\n",
 ).replace("262144\n178", "262145\n178", 1)
 
+TEXT_STYLE_OVERRIDE_TABLE = make_table(
+    "T",
+    "H",
+    "D",
+    first_cell_extra="7\nTABLE_ALT\n",
+).replace("262144\n178", "262160\n178", 1)
+
 LOCAL_TEXT_COLOR_TABLE = make_table(
     "T",
     "H",
     "D",
     first_cell_extra="63\n217\n421\n9643919\n283\n0\n",
+).replace("262144\n178", "262150\n178", 1)
+
+LOCAL_FILL_ACI_TABLE = make_table(
+    "T",
+    "H",
+    "D",
+    first_cell_extra="63\n45\n283\n0\n",
+).replace("262144\n178", "262150\n178", 1)
+
+LOCAL_FILL_TRUE_COLOR_TABLE = make_table(
+    "T",
+    "H",
+    "D",
+    first_cell_extra="63\n177\n421\n3811732\n283\n0\n",
 ).replace("262144\n178", "262150\n178", 1)
 
 INLINE_COLOR_TABLE = make_table(r"{\C215;\c10507177;T}", "H", "D")
@@ -845,6 +866,14 @@ def test_reads_cell_alignment_override():
     assert cell.alignment == 4
 
 
+def test_reads_cell_text_style_override():
+    table = load_table(TEXT_STYLE_OVERRIDE_TABLE)
+    cell = table.get_cell(0, 0)
+
+    assert cell.override_flags == 262160
+    assert cell.text_style == "TABLE_ALT"
+
+
 def test_preserves_inline_content_color_codes_in_text_payload():
     table = load_table(INLINE_COLOR_TABLE)
     cell = table.get_cell(0, 0)
@@ -860,6 +889,26 @@ def test_reads_local_text_color_override_tags():
     assert cell.override_flags == 262150
     assert cell.fill_color == 217
     assert cell.fill_true_color == 9643919
+    assert cell.fill_enabled == 0
+
+
+def test_reads_local_fill_aci_override_tags():
+    table = load_table(LOCAL_FILL_ACI_TABLE)
+    cell = table.get_cell(0, 0)
+
+    assert cell.override_flags == 262150
+    assert cell.fill_color == 45
+    assert cell.fill_true_color is None
+    assert cell.fill_enabled == 0
+
+
+def test_reads_local_fill_true_color_override_tags():
+    table = load_table(LOCAL_FILL_TRUE_COLOR_TABLE)
+    cell = table.get_cell(0, 0)
+
+    assert cell.override_flags == 262150
+    assert cell.fill_color == 177
+    assert cell.fill_true_color == 3811732
     assert cell.fill_enabled == 0
 
 
@@ -1050,8 +1099,7 @@ def test_add_table_one_row_suppresses_title_and_header():
 def test_exports_authored_text_height_override_and_uses_it_for_geometry():
     doc = ezdxf.new("R2018")
     table = doc.modelspace().add_table((0, 0), [["T"], ["H"], ["D"]])
-    assert table.data is not None
-    table.data.row_heights[0] = 29.66666666666667
+    table.set_row_height(0, 29.66666666666667)
     table.set_cell_text_height(0, 0, 20.0)
 
     collector = TagCollector(dxfversion=doc.dxfversion)
@@ -1123,10 +1171,10 @@ def test_set_cell_text_updates_export_and_geometry():
     assert mtext.text == "TITLE-LONG"
 
 
-def test_exports_authored_local_text_color_override_and_rebuilds_geometry():
+def test_exports_authored_local_fill_override_and_rebuilds_geometry():
     doc = ezdxf.new("R2018")
     table = doc.modelspace().add_table((0, 0), [["T"], ["H"], ["D"]])
-    table.set_cell_text_color(0, 0, 217, 9643919)
+    table.set_cell_fill_color(0, 0, 217, 9643919)
 
     collector = TagCollector(dxfversion=doc.dxfversion)
     table.export_dxf(collector)
@@ -1140,8 +1188,129 @@ def test_exports_authored_local_text_color_override_and_rebuilds_geometry():
     block = doc.blocks.get(table.dxf.geometry)
     assert block is not None
     mtext = list(block.query("MTEXT"))[0]
-    assert mtext.dxf.color == 217
-    assert mtext.dxf.true_color == 9643919
+    assert mtext.dxf.color == 0
+    assert mtext.dxf.hasattr("true_color") is False
+
+
+def test_exports_disabled_fill_state():
+    doc = ezdxf.new("R2018")
+    table = doc.modelspace().add_table((0, 0), [["T"], ["H"], ["D"]])
+    table.clear_cell_fill(0, 0)
+
+    collector = TagCollector(dxfversion=doc.dxfversion)
+    table.export_dxf(collector)
+    exported = Tags(collector.tags)
+
+    assert exported.find_all(91)[1].value == 262150
+    assert exported.find_all(63)[0].value == 0
+    assert exported.find_all(283)[0].value == 1
+
+    block = doc.blocks.get(table.dxf.geometry)
+    assert block is not None
+    mtext = list(block.query("MTEXT"))[0]
+    assert mtext.dxf.color == 0
+    assert mtext.dxf.hasattr("true_color") is False
+
+
+def test_can_disable_fill_after_setting_fill_color():
+    doc = ezdxf.new("R2018")
+    table = doc.modelspace().add_table((0, 0), [["T"], ["H"], ["D"]])
+    table.set_cell_fill_color(0, 0, 177, 3811732)
+    table.set_cell_fill_enabled(0, 0, False)
+
+    cell = table.get_cell(0, 0)
+
+    assert cell.override_flags == 262150
+    assert cell.fill_color == 0
+    assert cell.fill_true_color is None
+    assert cell.fill_enabled == 1
+
+
+def test_can_not_enable_fill_without_fill_color():
+    doc = ezdxf.new("R2018")
+    table = doc.modelspace().add_table((0, 0), [["T"], ["H"], ["D"]])
+
+    with pytest.raises(const.DXFValueError):
+        table.set_cell_fill_enabled(0, 0, True)
+
+
+def test_exports_authored_text_style_override_and_rebuilds_geometry():
+    doc = ezdxf.new("R2018")
+    doc.styles.new("TABLE_ALT", dxfattribs={"font": "arial.ttf"})
+    table = doc.modelspace().add_table((0, 0), [["T"], ["H"], ["D"]])
+    table.set_cell_text_style(0, 0, "TABLE_ALT")
+
+    collector = TagCollector(dxfversion=doc.dxfversion)
+    table.export_dxf(collector)
+    exported = Tags(collector.tags)
+
+    assert exported.find_all(91)[1].value == 262160
+    assert exported.find_all(7)[0].value == "TABLE_ALT"
+
+    block = doc.blocks.get(table.dxf.geometry)
+    assert block is not None
+    mtext = list(block.query("MTEXT"))[0]
+    assert mtext.dxf.style == "TABLE_ALT"
+
+
+def test_set_col_width_updates_export_and_geometry():
+    doc = ezdxf.new("R2018")
+    table = doc.modelspace().add_table((0, 0), [["T", "H"], ["D", "E"]])
+    table.set_col_width(1, 30.0)
+
+    collector = TagCollector(dxfversion=doc.dxfversion)
+    table.export_dxf(collector)
+    exported = Tags(collector.tags)
+
+    assert [tag.value for tag in exported.find_all(142)] == [63.5, 30.0]
+
+    block = doc.blocks.get(table.dxf.geometry)
+    assert block is not None
+    verticals = list(block.query("LINE"))
+    assert any(line.dxf.start == (93.5, 0.0, 0.0) for line in verticals)
+
+
+def test_set_row_height_updates_export_and_geometry():
+    doc = ezdxf.new("R2018")
+    table = doc.modelspace().add_table((0, 0), [["T"], ["H"], ["D"]])
+    table.set_row_height(0, 29.66666666666667)
+
+    collector = TagCollector(dxfversion=doc.dxfversion)
+    table.export_dxf(collector)
+    exported = Tags(collector.tags)
+
+    assert [tag.value for tag in exported.find_all(141)] == [29.66666666666667, 9.0, 9.0]
+
+    block = doc.blocks.get(table.dxf.geometry)
+    assert block is not None
+    horizontals = list(block.query("LINE"))
+    assert any(line.dxf.start == (0.0, -29.66666666666667, 0.0) for line in horizontals)
+
+
+def test_set_title_suppressed_changes_style_bucket_mapping():
+    doc = ezdxf.new("R2018")
+    table = doc.modelspace().add_table((0, 0), [["T"], ["H"], ["D"]])
+    style = doc.table_styles.get("Standard")
+
+    assert style is not None
+    table.set_title_suppressed(True)
+
+    assert table.data is not None
+    assert table.data.suppress_title == 1
+    assert table.get_row_style_bucket(0) is style.header_style
+
+
+def test_set_column_header_suppressed_changes_style_bucket_mapping():
+    doc = ezdxf.new("R2018")
+    table = doc.modelspace().add_table((0, 0), [["T"], ["H"], ["D"]])
+    style = doc.table_styles.get("Standard")
+
+    assert style is not None
+    table.set_column_header_suppressed(True)
+
+    assert table.data is not None
+    assert table.data.suppress_column_header == 1
+    assert table.get_row_style_bucket(1) is style.data_style
 
 
 def test_reads_table_style_cell_buckets():

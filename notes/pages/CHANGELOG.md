@@ -27,8 +27,10 @@
 		- resolves text-cell `FIELD` handles back to loaded `FIELD` objects when present
 	- NEW: experimental text-only `ACAD_TABLE` authoring support
 		- adds `layout.add_table()` for text-only tables backed by an anonymous `*T` geometry block
-		- adds text-cell mutation helpers: `set_cell_text()`, `set_cell_text_height()`, `set_cell_alignment()`, `set_cell_content_color()`, and `set_cell_text_color()`
-		- validated by AutoCAD/Core Console roundtrip artifacts for the minimal writer, local text-height and alignment overrides, inline payload color formatting, and local semantic text-color overrides
+		- adds table-layout mutation helpers: `set_row_height()`, `set_col_width()`, `set_title_suppressed()`, and `set_column_header_suppressed()`
+		- adds text-cell mutation helpers: `set_cell_text()`, `set_cell_text_height()`, `set_cell_alignment()`, `set_cell_text_style()`, `set_cell_content_color()`, `set_cell_fill_color()`, `set_cell_fill_enabled()`, and `clear_cell_fill()`
+		- keeps `set_cell_text_color()` as a compatibility alias for the validated local fill/background override surface
+		- validated by AutoCAD/Core Console roundtrip artifacts for the minimal writer, local text-height and alignment overrides, inline payload color formatting, local fill/background overrides, and text-style overrides
 	- NEW: initial typed `TABLESTYLE` read support
 		- registers and loads real `TABLESTYLE` objects instead of falling back to raw tag storage
 		- exposes `doc.table_styles`

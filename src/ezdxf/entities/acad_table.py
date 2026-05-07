@@ -55,6 +55,7 @@ CELL_OVERRIDE_BASE = 262144
 CELL_OVERRIDE_ALIGNMENT = 1
 CELL_OVERRIDE_LOCAL_COLOR = 2
 CELL_OVERRIDE_LOCAL_TRUE_COLOR = 4
+CELL_OVERRIDE_TEXT_STYLE = 16
 CELL_OVERRIDE_TEXT_HEIGHT = 32
 
 
@@ -321,7 +322,7 @@ class AcadTableCell:
     def set_text_content(self, text: str) -> None:
         self.text = str(text)
 
-    def set_text_color(
+    def set_fill_color(
         self, aci: Optional[int], true_color: Optional[int] = None
     ) -> None:
         if aci is None and true_color is None:
@@ -334,7 +335,7 @@ class AcadTableCell:
             return
         if aci is None:
             raise const.DXFValueError(
-                "ACI color is required for local text color override"
+                "ACI color is required for local fill override"
             )
         aci = int(aci)
         if aci < 0 or aci > 256:
@@ -353,6 +354,43 @@ class AcadTableCell:
                 )
             self.fill_true_color = true_color
             self.override_flags |= CELL_OVERRIDE_LOCAL_TRUE_COLOR
+
+    def set_fill_enabled(self, enabled: bool) -> None:
+        if enabled:
+            if self.fill_color in (None, 0):
+                raise const.DXFValueError(
+                    "enabling fill requires a non-zero fill color"
+                )
+            self.fill_enabled = 0
+            self.override_flags |= CELL_OVERRIDE_BASE | CELL_OVERRIDE_LOCAL_COLOR
+            return
+        self.fill_color = 0
+        self.fill_true_color = None
+        self.fill_enabled = 1
+        self.override_flags |= (
+            CELL_OVERRIDE_BASE
+            | CELL_OVERRIDE_LOCAL_COLOR
+            | CELL_OVERRIDE_LOCAL_TRUE_COLOR
+        )
+
+    def clear_fill(self) -> None:
+        self.set_fill_enabled(False)
+
+    def set_text_color(
+        self, aci: Optional[int], true_color: Optional[int] = None
+    ) -> None:
+        # Backwards-compatible alias for the validated semantic fill override.
+        self.set_fill_color(aci, true_color)
+
+    def set_text_style(self, name: Optional[str]) -> None:
+        if name is None:
+            self.text_style = None
+            self.override_flags &= ~CELL_OVERRIDE_TEXT_STYLE
+        else:
+            self.text_style = str(name)
+            if len(self.text_style) == 0:
+                raise const.DXFValueError("text style name can not be empty")
+            self.override_flags |= CELL_OVERRIDE_BASE | CELL_OVERRIDE_TEXT_STYLE
 
 
 @dataclass
@@ -1474,12 +1512,8 @@ class AcadTableBlockContent(DXFTagStorage):
                 "attachment_point": attachment,
             },
         )
-        if cell.fill_color is not None:
-            mtext.dxf.color = cell.fill_color
-        else:
-            mtext.dxf.color = 0
-        if cell.fill_true_color is not None:
-            mtext.dxf.true_color = cell.fill_true_color
+        mtext.dxf.color = 0
+        mtext.dxf.discard("true_color")
 
     def rebuild_text_table_geometry(self) -> None:
         if self.doc is None or self.data is None:
@@ -1502,6 +1536,36 @@ class AcadTableBlockContent(DXFTagStorage):
         self.rebuild_text_table_geometry()
         return cell
 
+    def set_col_width(self, index: int, value: float) -> None:
+        if self.data is None:
+            raise IndexError("ACAD_TABLE has no parsed column data")
+        value = float(value)
+        if value <= 0.0:
+            raise const.DXFValueError("column width has to be greater than 0")
+        self.data.col_widths[index] = value
+        self.rebuild_text_table_geometry()
+
+    def set_row_height(self, index: int, value: float) -> None:
+        if self.data is None:
+            raise IndexError("ACAD_TABLE has no parsed row data")
+        value = float(value)
+        if value <= 0.0:
+            raise const.DXFValueError("row height has to be greater than 0")
+        self.data.row_heights[index] = value
+        self.rebuild_text_table_geometry()
+
+    def set_title_suppressed(self, state: bool = True) -> None:
+        if self.data is None:
+            raise IndexError("ACAD_TABLE has no parsed table data")
+        self.data.suppress_title = int(bool(state))
+        self.rebuild_text_table_geometry()
+
+    def set_column_header_suppressed(self, state: bool = True) -> None:
+        if self.data is None:
+            raise IndexError("ACAD_TABLE has no parsed table data")
+        self.data.suppress_column_header = int(bool(state))
+        self.rebuild_text_table_geometry()
+
     def set_cell_alignment(self, row: int, col: int, value: Optional[int]) -> AcadTableCell:
         cell = self.get_cell(row, col)
         cell.set_alignment(value)
@@ -1522,11 +1586,44 @@ class AcadTableBlockContent(DXFTagStorage):
         self.rebuild_text_table_geometry()
         return cell
 
+    def set_cell_text_style(
+        self, row: int, col: int, style_name: Optional[str]
+    ) -> AcadTableCell:
+        if style_name is not None:
+            if self.doc is None:
+                raise const.DXFStructureError("ACAD_TABLE requires a valid DXF document")
+            if style_name not in self.doc.styles:
+                raise const.DXFValueError(f"text style '{style_name}' does not exist")
+        cell = self.get_cell(row, col)
+        cell.set_text_style(style_name)
+        self.rebuild_text_table_geometry()
+        return cell
+
     def set_cell_text_color(
         self, row: int, col: int, aci: Optional[int], true_color: Optional[int] = None
     ) -> AcadTableCell:
         cell = self.get_cell(row, col)
         cell.set_text_color(aci, true_color)
+        self.rebuild_text_table_geometry()
+        return cell
+
+    def set_cell_fill_color(
+        self, row: int, col: int, aci: Optional[int], true_color: Optional[int] = None
+    ) -> AcadTableCell:
+        cell = self.get_cell(row, col)
+        cell.set_fill_color(aci, true_color)
+        self.rebuild_text_table_geometry()
+        return cell
+
+    def set_cell_fill_enabled(self, row: int, col: int, enabled: bool) -> AcadTableCell:
+        cell = self.get_cell(row, col)
+        cell.set_fill_enabled(enabled)
+        self.rebuild_text_table_geometry()
+        return cell
+
+    def clear_cell_fill(self, row: int, col: int) -> AcadTableCell:
+        cell = self.get_cell(row, col)
+        cell.clear_fill()
         self.rebuild_text_table_geometry()
         return cell
 
@@ -1591,6 +1688,8 @@ class AcadTableBlockContent(DXFTagStorage):
             write_tag2(91, _export_cell_override_flags(cell))
             write_tag2(178, cell.virtual_edge_flag)
             write_tag2(145, cell.rotation)
+            if cell.text_style is not None:
+                write_tag2(7, cell.text_style)
             if cell.text_height is not None:
                 write_tag2(140, cell.text_height)
             if cell.alignment is not None:
@@ -1913,11 +2012,15 @@ def _export_cell_override_flags(cell: AcadTableCell) -> int:
         flags |= CELL_OVERRIDE_ALIGNMENT
     else:
         flags &= ~CELL_OVERRIDE_ALIGNMENT
+    if cell.text_style is not None:
+        flags |= CELL_OVERRIDE_TEXT_STYLE
+    else:
+        flags &= ~CELL_OVERRIDE_TEXT_STYLE
     if cell.fill_color is not None:
         flags |= CELL_OVERRIDE_LOCAL_COLOR
     else:
         flags &= ~CELL_OVERRIDE_LOCAL_COLOR
-    if cell.fill_true_color is not None:
+    if cell.fill_true_color is not None or cell.fill_enabled == 1:
         flags |= CELL_OVERRIDE_LOCAL_TRUE_COLOR
     else:
         flags &= ~CELL_OVERRIDE_LOCAL_TRUE_COLOR
