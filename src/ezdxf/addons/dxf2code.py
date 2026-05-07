@@ -1027,6 +1027,121 @@ class _SourceCodeGenerator:
         # attribute
         self.add_source_code_line("e.text = {}".format(json.dumps(entity.text)))
 
+    def _acad_table(self, entity: DXFEntity) -> None:
+        data = getattr(entity, "data", None)
+        if data is None:
+            self.add_source_code_line('# unsupported DXF entity "ACAD_TABLE"')
+            return
+
+        style = getattr(entity, "get_table_style", lambda: None)()
+        style_name = style.dxf.name if style is not None else "Standard"
+        if style_name != "Standard":
+            self.add_source_code_line(
+                f"# ACAD_TABLE requires TABLESTYLE {json.dumps(style_name)} in target doc"
+            )
+
+        dxfattribs = _purge_handles(entity.dxfattribs())
+        insert = dxfattribs.pop("insert", (0, 0, 0))
+        for key in (
+            "geometry",
+            "version",
+            "table_style_id",
+            "block_record_handle",
+            "horizontal_direction",
+            "table_value",
+            "n_rows",
+            "n_cols",
+            "override_flag",
+            "border_color_override_flag",
+            "border_lineweight_override_flag",
+            "border_visibility_override_flag",
+        ):
+            dxfattribs.pop(key, None)
+        self.add_used_resources(dxfattribs)
+
+        content: list[list[str]] = []
+        for row in data.rows():
+            content.append([
+                cell.text if cell.is_text_cell else ""
+                for cell in row
+            ])
+
+        self.add_source_code_line(f"e = {self.layout}.add_table(")
+        self.add_source_code_line(f"    {self._format_python_value(insert)},")
+        self.add_source_code_line(f"    {self._format_python_value(content)},")
+        if style_name != "Standard":
+            self.add_source_code_line(f"    style_name={json.dumps(style_name)},")
+        self.add_source_code_line(
+            f"    row_heights={self._format_python_value(data.row_heights)},"
+        )
+        self.add_source_code_line(
+            f"    col_widths={self._format_python_value(data.col_widths)},"
+        )
+        self.add_source_code_line("    dxfattribs={")
+        self.add_source_code_lines(_fmt_mapping(dxfattribs, indent=8))
+        self.add_source_code_line("    },")
+        self.add_source_code_line(")")
+
+        self._emit_acad_table_mutations(entity)
+
+    def _emit_acad_table_mutations(self, entity: DXFEntity) -> None:
+        data = getattr(entity, "data", None)
+        if data is None:
+            return
+
+        inferred_title = 0 if data.n_rows >= 3 else 1
+        inferred_header = 0 if data.n_rows >= 2 else 1
+        if (data.suppress_title or 0) != inferred_title:
+            self.add_source_code_line(
+                f"e.set_title_suppressed({bool(data.suppress_title)})"
+            )
+        if (data.suppress_column_header or 0) != inferred_header:
+            self.add_source_code_line(
+                f"e.set_column_header_suppressed({bool(data.suppress_column_header)})"
+            )
+
+        for cell in data.cells:
+            row = cell.row
+            col = cell.col
+            if cell.is_block_cell:
+                block_name = getattr(entity, "get_cell_block_name", lambda *_: "")(row, col)
+                if not block_name:
+                    self.add_source_code_line(
+                        f"# unsupported ACAD_TABLE block cell at ({row}, {col})"
+                    )
+                    continue
+                self.code.blocks.add(block_name)
+                alignment = cell.alignment if cell.alignment is not None else 1
+                self.add_source_code_line(
+                    f"e.set_cell_block({row}, {col}, {json.dumps(block_name)}, block_scale={cell.block_scale}, alignment={alignment})"
+                )
+                continue
+
+            if cell.text_height is not None:
+                self.add_source_code_line(
+                    f"e.set_cell_text_height({row}, {col}, {cell.text_height})"
+                )
+            if cell.alignment is not None:
+                self.add_source_code_line(
+                    f"e.set_cell_alignment({row}, {col}, {cell.alignment})"
+                )
+            if cell.text_style is not None:
+                self.code.styles.add(cell.text_style)
+                self.add_source_code_line(
+                    f"e.set_cell_text_style({row}, {col}, {json.dumps(cell.text_style)})"
+                )
+            if cell.fill_enabled == 1:
+                self.add_source_code_line(f"e.clear_cell_fill({row}, {col})")
+            elif cell.fill_color is not None:
+                if cell.fill_true_color is not None:
+                    self.add_source_code_line(
+                        f"e.set_cell_fill_color({row}, {col}, {cell.fill_color}, {cell.fill_true_color})"
+                    )
+                else:
+                    self.add_source_code_line(
+                        f"e.set_cell_fill_color({row}, {col}, {cell.fill_color})"
+                    )
+
     def _multileader(self, entity: "MultiLeader") -> None:
         supported, resources = self._multileader_supported(entity)
         if not supported:

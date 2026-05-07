@@ -838,5 +838,74 @@ def test_multileader_block_content_to_code():
     assert block_attrib1.text == "Data2"
 
 
+def test_acad_table_text_surface_to_code():
+    source_doc = ezdxf.new("R2018")
+    source_msp = source_doc.modelspace()
+    table = source_msp.add_table(
+        (1, 2),
+        [["TITLE", "STATUS"], ["HEADER", "VALUE"], ["DATA", "OK"]],
+        row_heights=[11.0, 9.0, 9.0],
+        col_widths=[38.0, 28.0],
+    )
+    table.set_row_height(0, 20.0)
+    table.set_col_width(1, 30.0)
+    table.set_title_suppressed(True)
+    table.set_cell_text(1, 1, "VALUE-LONG")
+    table.set_cell_text_height(0, 0, 20.0)
+    table.set_cell_alignment(0, 1, 4)
+    table.set_cell_content_color(1, 0, 215, 10507177)
+    table.set_cell_fill_color(0, 1, 177, 3811732)
+    table.clear_cell_fill(0, 1)
+
+    new_doc, new_msp = translate_entities_to_new_layout(source_msp)
+    new_table = next(entity for entity in new_msp if entity.dxftype() == "ACAD_TABLE")
+
+    assert new_table.data is not None
+    assert new_table.dxf.insert == table.dxf.insert
+    assert new_table.data.row_heights == table.data.row_heights
+    assert new_table.data.col_widths == table.data.col_widths
+    assert new_table.data.suppress_title == table.data.suppress_title
+    assert new_table.data.suppress_column_header == table.data.suppress_column_header
+    assert [cell.text for cell in new_table.data.cells] == [cell.text for cell in table.data.cells]
+
+    src_cells = table.data.cells
+    dst_cells = new_table.data.cells
+    assert dst_cells[0].text_height == src_cells[0].text_height
+    assert dst_cells[1].alignment == src_cells[1].alignment
+    assert dst_cells[1].fill_enabled == 1
+    assert dst_cells[1].fill_color == 0
+    assert dst_cells[2].text == src_cells[2].text
+
+    assert len(list(new_table.virtual_entities())) == len(list(table.virtual_entities()))
+    assert new_doc.table_styles.get("Standard") is not None
+
+
+def test_acad_table_minimal_block_cell_to_code():
+    source_doc = ezdxf.new("R2018")
+    block = source_doc.blocks.new("TABLE_BLOCK_CELL_MIN", base_point=(0, 0))
+    block.add_lwpolyline([(0, 0), (2, 0), (2, 2), (0, 2)], close=True)
+    source_msp = source_doc.modelspace()
+    table = source_msp.add_table((0, 0), [["T"], ["H"], [""]])
+    table.set_cell_block(2, 0, "TABLE_BLOCK_CELL_MIN", block_scale=1.0, alignment=1)
+
+    target_doc = ezdxf.new("R2018")
+    namespace = {"ezdxf": ezdxf, "doc": target_doc, "msp": target_doc.modelspace()}
+    execute_code_in_namespace(block_to_code(block, drawing="doc"), namespace)
+    execute_code_in_namespace(entities_to_code(source_msp, layout="msp"), namespace)
+
+    new_doc = namespace["doc"]
+    new_msp = namespace["msp"]
+    new_table = next(entity for entity in new_msp if entity.dxftype() == "ACAD_TABLE")
+    new_cell = new_table.get_cell(2, 0)
+
+    assert new_cell.is_block_cell is True
+    assert new_cell.block_scale == 1.0
+    assert new_cell.alignment == 1
+    assert new_table.get_cell_block_name(2, 0) == "TABLE_BLOCK_CELL_MIN"
+    inserts = [entity for entity in new_table.virtual_entities() if entity.dxftype() == "INSERT"]
+    assert len(inserts) == 1
+    assert inserts[0].dxf.name == "TABLE_BLOCK_CELL_MIN"
+
+
 if __name__ == "__main__":
     pytest.main([__file__])

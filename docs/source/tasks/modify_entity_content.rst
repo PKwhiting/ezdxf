@@ -73,6 +73,11 @@ Local text-style overrides can be authored by::
 
     table.set_cell_text_style(0, 1, "TABLE_ALT")
 
+The current minimal block-cell authoring helper can replace a text cell by a
+block cell without linked `TABLECONTENT` or block attributes::
+
+    table.set_cell_block(2, 0, "TABLE_BLOCK_CELL_MIN")
+
 These helpers rebuild the anonymous `*T` geometry block automatically so the
 visible block content stays consistent with the semantic table shell.
 

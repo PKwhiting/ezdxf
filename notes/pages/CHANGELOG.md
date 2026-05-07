@@ -17,6 +17,8 @@
 		- preserves supported hosted field graphs during code generation roundtrip
 		- recreates MTEXT-content and block-content `MULTILEADER` entities, custom `MLEADERSTYLE`, and arrow-head mappings
 		- supports direct `MLEADERSTYLE` generation by `table_entries_to_code()`
+		- recreates the validated `ACAD_TABLE` text-table surface through `add_table()` plus mutation helpers
+		- recreates minimal no-attribute `ACAD_TABLE` block cells through `set_cell_block()`
 	- NEW: initial typed `ACAD_TABLE` read support
 		- reads row and column counts, row heights, and column widths
 		- reads ordered text cell content
@@ -29,6 +31,7 @@
 		- adds `layout.add_table()` for text-only tables backed by an anonymous `*T` geometry block
 		- adds table-layout mutation helpers: `set_row_height()`, `set_col_width()`, `set_title_suppressed()`, and `set_column_header_suppressed()`
 		- adds text-cell mutation helpers: `set_cell_text()`, `set_cell_text_height()`, `set_cell_alignment()`, `set_cell_text_style()`, `set_cell_content_color()`, `set_cell_fill_color()`, `set_cell_fill_enabled()`, and `clear_cell_fill()`
+		- adds a minimal block-cell mutation helper: `set_cell_block()` for no-attribute block cells without authored linked `TABLECONTENT`
 		- keeps `set_cell_text_color()` as a compatibility alias for the validated local fill/background override surface
 		- validated by AutoCAD/Core Console roundtrip artifacts for the minimal writer, local text-height and alignment overrides, inline payload color formatting, local fill/background overrides, and text-style overrides
 	- NEW: initial typed `TABLESTYLE` read support

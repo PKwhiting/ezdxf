@@ -221,6 +221,7 @@ complete content is stored in the first row. All cells contain strings.
     - updating text cell inline payload color formatting by `set_cell_content_color()`
     - updating text cell local fill/background overrides by `set_cell_fill_color()`
     - disabling text cell local fill/background by `clear_cell_fill()` or `set_cell_fill_enabled(..., False)`
+    - setting a minimal block cell by `set_cell_block()`
 
     These mutation helpers rebuild the anonymous `*T` geometry block so the
     visible block content stays in sync with the semantic `AcDbTable` shell.
@@ -287,6 +288,7 @@ complete content is stored in the first row. All cells contain strings.
         table.set_cell_content_color(1, 0, 215, 10507177)
         table.set_cell_fill_color(0, 1, 217, 9643919)
         table.clear_cell_fill(0, 1)
+        table.set_cell_block(2, 0, "TABLE_BLOCK_CELL_MIN")
 
 INSERT Entity - Block References
 --------------------------------

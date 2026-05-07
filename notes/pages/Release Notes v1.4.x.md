@@ -54,6 +54,8 @@
 		- recreates MTEXT-content and block-content `MULTILEADER` entities
 		- recreates custom `MLEADERSTYLE` entries and arrow-head mappings
 		- supports direct `MLEADERSTYLE` generation by `table_entries_to_code()`
+		- recreates validated `ACAD_TABLE` text tables through `add_table()` and the current mutation-helper surface
+		- recreates minimal no-attribute `ACAD_TABLE` block cells through `set_cell_block()`
 		- validated by AutoCAD/Core Console roundtrip artifacts
 	- Initial typed `ACAD_TABLE` read support:
 		- reads row and column counts
@@ -68,6 +70,7 @@
 		- adds `layout.add_table()` for text-only tables
 		- adds table-layout mutation helpers for row height, column width, and title/header suppression
 		- adds text-cell mutation helpers for text content, text height, alignment, text style, inline payload color, local fill/background overrides, and explicit fill disable/enable-state helpers
+		- adds a minimal block-cell helper for no-attribute block cells without authored linked `TABLECONTENT`
 		- keeps `set_cell_text_color()` as a compatibility alias for that validated fill override surface
 		- validated by AutoCAD/Core Console roundtrip artifacts
 	- Initial typed `TABLESTYLE` read support:

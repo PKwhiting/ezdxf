@@ -1253,6 +1253,67 @@ def test_exports_authored_text_style_override_and_rebuilds_geometry():
     assert mtext.dxf.style == "TABLE_ALT"
 
 
+def test_exports_minimal_block_cell_and_rebuilds_geometry():
+    doc = ezdxf.new("R2018")
+    block = doc.blocks.new("TABLE_BLOCK_CELL_MIN", base_point=(0, 0))
+    block.add_lwpolyline([(0, 0), (2, 0), (2, 2), (0, 2)], close=True)
+    table = doc.modelspace().add_table((0, 0), [["T"], ["H"], [""]])
+    table.set_cell_block(2, 0, "TABLE_BLOCK_CELL_MIN", block_scale=1.0, alignment=1)
+
+    collector = TagCollector(dxfversion=doc.dxfversion)
+    table.export_dxf(collector)
+    exported = Tags(collector.tags)
+
+    assert exported.find_all(171)[2].value == 2
+    assert exported.find_all(91)[3].value == 262145
+    assert exported.find_all(340)[0].value == block.block_record_handle
+    assert exported.find_all(144)[0].value == 1.0
+    assert exported.find_all(179)[0].value == 0
+    assert exported.find_all(170)[0].value == 1
+
+    geometry = doc.blocks.get(table.dxf.geometry)
+    assert geometry is not None
+    inserts = list(geometry.query("INSERT"))
+    assert len(inserts) == 1
+    assert inserts[0].dxf.name == "TABLE_BLOCK_CELL_MIN"
+
+
+def test_block_cell_attribs_create_authored_linked_tablecontent():
+    doc = ezdxf.new("R2018")
+    block = doc.blocks.new("TABLE_BLOCK_CELL_ATTR", base_point=(0, 0))
+    block.add_lwpolyline([(0, 0), (3, 0), (3, 2), (0, 2)], close=True)
+    block.add_attdef("ONE", insert=(0.5, 0.5), text="ONE")
+    block.add_attdef("TWO", insert=(2.5, 1.5), text="TWO")
+    table = doc.modelspace().add_table((0, 0), [["T"], ["H"], [""]])
+    table.set_cell_block(2, 0, "TABLE_BLOCK_CELL_ATTR", block_scale=1.0, alignment=1)
+    table.set_cell_block_attribs(2, 0, {"ONE": "X", "TWO": "Y"})
+
+    table_content = table.get_linked_table_content()
+
+    assert table_content is not None
+    assert isinstance(table_content, TableContent)
+    linked = table.load_linked_data()
+    assert linked is not None
+    cell = table.get_cell(2, 0)
+    assert cell.has_block_attributes is True
+    assert table.get_cell_block_attribs(2, 0) == {"ONE": "X", "TWO": "Y"}
+
+    xrecord = table.get_extension_dict().dictionary.get("ACAD_XREC_ROUNDTRIP")
+    assert xrecord is not None
+    assert any(tag.code == 360 and tag.value == table_content.dxf.handle for tag in xrecord.tags)
+
+    collector = TagCollector(dxfversion=doc.dxfversion)
+    table_content.export_dxf(collector)
+    exported = Tags(collector.tags)
+    assert exported.get_first_value(0) == "TABLECONTENT"
+    assert block.block_record_handle in [tag.value for tag in exported.find_all(340)]
+    attdef_handles = [attdef.dxf.handle for attdef in block.attdefs()]
+    exported_330 = [tag.value for tag in exported.find_all(330)]
+    assert attdef_handles[0] in exported_330
+    assert attdef_handles[1] in exported_330
+    assert [tag.value for tag in exported.find_all(301) if tag.value in ("X", "Y")] == ["X", "Y"]
+
+
 def test_set_col_width_updates_export_and_geometry():
     doc = ezdxf.new("R2018")
     table = doc.modelspace().add_table((0, 0), [["T", "H"], ["D", "E"]])
