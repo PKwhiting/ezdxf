@@ -672,6 +672,7 @@ class MText(DXFGraphic):
         self.text: str = ""
         # Linked MText columns do not have a MTextColumns() object!
         self._columns: Optional[MTextColumns] = None
+        self._force_optional_line_spacing_style = False
 
     def _get_text(self):
         """Getter for virtual Mtext.dxf.text attribute.
@@ -1334,6 +1335,8 @@ class MText(DXFGraphic):
                 "bg_fill_transparency",
             ],
         )
+        if self._force_optional_line_spacing_style:
+            tagwriter.write_tag2(73, self.dxf.get("line_spacing_style", 1))
         columns = self._columns
         if columns is None or columns.column_type == ColumnType.NONE:
             return

@@ -45,6 +45,8 @@ __all__ = [
     "AcadTableLinkedRow",
     "AcadTableBlockContent",
     "TableContent",
+    "CellStyleMap",
+    "TableGeometry",
     "TableStyle",
     "TableStyleManager",
     "acad_table_to_block",
@@ -104,6 +106,7 @@ class AcadTableLinkedCellContent:
     block_scale: Optional[float] = None
     alignment: Optional[int] = None
     block_attributes: list[AcadTableBlockAttributeValue] = field(default_factory=list)
+    content_format: Optional[AcadTableContentFormat] = None
 
     @property
     def is_block_content(self) -> bool:
@@ -132,6 +135,10 @@ class AcadTableLinkedCell:
     table_format: Optional[AcadTableFormat] = None
     raw_table_flags90: Optional[int] = None
     raw_table_flags91: Optional[int] = None
+    wrapper_block_record_handle: Optional[str] = None
+    wrapper_block_name: Optional[str] = None
+    wrapper_margin_x: Optional[float] = None
+    wrapper_margin_y: Optional[float] = None
 
 
 @dataclass
@@ -186,9 +193,14 @@ class AcadTableLinkedData:
             if tag.code == 1 and tag.value == "TABLECELL_BEGIN":
                 end = _find_marker_end(tags, index + 1, 309, "TABLECELL_END")
                 if len(data.cells):
-                    raw90, raw91 = _parse_table_cell_wrapper(Tags(tags[index : end + 1]))
+                    raw90, raw91, margin_x, margin_y, wrapper_block_record_handle = _parse_table_cell_wrapper(
+                        Tags(tags[index : end + 1])
+                    )
                     data.cells[-1].raw_table_flags90 = raw90
                     data.cells[-1].raw_table_flags91 = raw91
+                    data.cells[-1].wrapper_margin_x = margin_x
+                    data.cells[-1].wrapper_margin_y = margin_y
+                    data.cells[-1].wrapper_block_record_handle = wrapper_block_record_handle
                 index = end + 1
                 continue
             if tag.code == 1 and tag.value == "FORMATTEDTABLEDATAROW_BEGIN":
@@ -260,6 +272,11 @@ class AcadTableCell:
     field_handle: Optional[str] = None
     block_attributes: list[AcadTableBlockAttributeValue] = field(default_factory=list)
     linked_cell_contents: list[AcadTableLinkedCellContent] = field(default_factory=list)
+    linked_text: str = ""
+    wrapper_block_record_handle: Optional[str] = None
+    wrapper_block_name: Optional[str] = None
+    wrapper_margin_x: Optional[float] = None
+    wrapper_margin_y: Optional[float] = None
 
     @property
     def is_text_cell(self) -> bool:
@@ -396,6 +413,8 @@ class AcadTableCell:
     def set_block(
         self, block_record_handle: str, *, block_scale: float = 1.0, alignment: int = 1
     ) -> None:
+        if self.cell_type == 1 and len(self.text):
+            self.linked_text = self.text
         block_record_handle = str(block_record_handle)
         if len(block_record_handle) == 0:
             raise const.DXFValueError("block record handle can not be empty")
@@ -409,6 +428,7 @@ class AcadTableCell:
         self.text = ""
         self.block_attributes = []
         self.linked_cell_contents = []
+        self.wrapper_block_record_handle = None
         self.field_handle = None
         self.text_height = None
         self.text_style = None
@@ -705,15 +725,26 @@ def _parse_linked_table_row(tags: Tags, index: int) -> AcadTableLinkedRow:
     return row
 
 
-def _parse_table_cell_wrapper(tags: Tags) -> tuple[Optional[int], Optional[int]]:
+def _parse_table_cell_wrapper(
+    tags: Tags,
+) -> tuple[Optional[int], Optional[int], Optional[float], Optional[float], Optional[str]]:
     raw90: Optional[int] = None
     raw91: Optional[int] = None
+    margin_x: Optional[float] = None
+    margin_y: Optional[float] = None
+    wrapper_block_record_handle: Optional[str] = None
     for code, value in tags:
         if code == 90 and raw90 is None:
             raw90 = int(value)
         elif code == 91 and raw91 is None:
             raw91 = int(value)
-    return raw90, raw91
+        elif code == 40 and margin_x is None:
+            margin_x = float(value)
+        elif code == 41 and margin_y is None:
+            margin_y = float(value)
+        elif code == 330 and wrapper_block_record_handle is None:
+            wrapper_block_record_handle = str(value)
+    return raw90, raw91, margin_x, margin_y, wrapper_block_record_handle
 
 
 def _parse_linked_table_cell(tags: Tags, cell_index: int, n_cols: int) -> AcadTableLinkedCell:
@@ -1381,6 +1412,59 @@ class TableContent(DXFTagStorage):
 
 
 @factory.register_entity
+class CellStyleMap(DXFTagStorage):
+    DXFTYPE = "CELLSTYLEMAP"
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.data: Optional[TableStyleData] = None
+        self.text_style_handle: str = "0"
+
+    def export_entity(self, tagwriter: AbstractTagWriter) -> None:
+        if len(self.xtags.subclasses) > 1:
+            super().export_entity(tagwriter)
+            return
+        write_tag2 = tagwriter.write_tag2
+        write_tag2(const.SUBCLASS_MARKER, "AcDbCellStyleMap")
+        _export_cell_style_map_data(
+            tagwriter,
+            self.data if self.data is not None else _default_table_style_data(),
+            text_style_handle=self.text_style_handle,
+        )
+
+
+@factory.register_entity
+class TableGeometry(DXFTagStorage):
+    DXFTYPE = "TABLEGEOMETRY"
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.n_rows = 0
+        self.n_cols = 0
+
+    def load_dxf_attribs(
+        self, processor: Optional[SubclassProcessor] = None
+    ) -> DXFNamespace:
+        dxf = super().load_dxf_attribs(processor)
+        if processor:
+            tags = processor.subclass_by_index(1)
+            if tags is not None:
+                self.n_rows = int(tags.get_first_value(90, 0))
+                self.n_cols = int(tags.get_first_value(91, 0))
+        return dxf
+
+    def export_entity(self, tagwriter: AbstractTagWriter) -> None:
+        if len(self.xtags.subclasses) > 1:
+            super().export_entity(tagwriter)
+            return
+        write_tag2 = tagwriter.write_tag2
+        write_tag2(const.SUBCLASS_MARKER, "AcDbTableGeometry")
+        write_tag2(90, self.n_rows)
+        write_tag2(91, self.n_cols)
+        write_tag2(92, self.n_rows)
+
+
+@factory.register_entity
 class AcadTableBlockContent(DXFTagStorage):
     DXFTYPE = "ACAD_TABLE"
     DXFATTRIBS = DXFAttributes(
@@ -1395,6 +1479,13 @@ class AcadTableBlockContent(DXFTagStorage):
     @property
     def is_graphic_entity(self) -> bool:
         return True
+
+    def set_owner(self, owner: Optional[str], paperspace: int = 0) -> None:
+        self.dxf.owner = owner
+        if paperspace:
+            self.dxf.paperspace = paperspace
+        else:
+            self.dxf.discard("paperspace")
 
     def setup_text_table(
         self,
@@ -1564,10 +1655,12 @@ class AcadTableBlockContent(DXFTagStorage):
         assert self.data is not None
         if self.doc is None or cell.block_record_handle is None:
             return
-        block_record = self.doc.entitydb.get(cell.block_record_handle)
-        if block_record is None:
-            return
-        block_name = block_record.dxf.get("name")
+        block_name = cell.wrapper_block_name
+        if not block_name:
+            block_record = self.doc.entitydb.get(cell.block_record_handle)
+            if block_record is None:
+                return
+            block_name = block_record.dxf.get("name")
         if not isinstance(block_name, str) or len(block_name) == 0:
             return
         widths = self.data.col_widths
@@ -1731,6 +1824,8 @@ class AcadTableBlockContent(DXFTagStorage):
         attribs: list[AcadTableBlockAttributeValue] = []
         index = 1
         for attdef in block.attdefs():
+            attdef.dxf.lock_position = 0
+            setattr(attdef, "_force_optional_version_tag", True)
             tag = attdef.dxf.tag
             if tag in values:
                 attribs.append(
@@ -1748,8 +1843,68 @@ class AcadTableBlockContent(DXFTagStorage):
             )
         cell.block_attributes = attribs
         cell.block_attribute_count = len(attribs)
+        self._ensure_block_cell_wrapper(cell, block_name)
+        self.rebuild_text_table_geometry()
         self._sync_linked_table_content()
         return cell
+
+    def _ensure_block_cell_wrapper(self, cell: AcadTableCell, block_name: str) -> None:
+        if self.doc is None:
+            return
+        if cell.wrapper_block_record_handle is not None:
+            return
+        wrapper = self.doc.blocks.new_anonymous_block()
+        cell.wrapper_block_name = wrapper.name
+        if len(cell.linked_text):
+            label = wrapper.add_mtext(
+                cell.linked_text,
+                dxfattribs={
+                    "color": 0,
+                    "transparency": 16777216,
+                    "insert": (1.5, -21.5, 0.0),
+                    "char_height": 4.5,
+                    "width": 3.1,
+                    "attachment_point": 1,
+                    "flow_direction": 5,
+                    "line_spacing_style": 1,
+                    "line_spacing_factor": 1.0,
+                },
+            )
+            setattr(label, "_force_optional_line_spacing_style", True)
+        insert = Vec3(4.780000000000001, -27.5, 0.0)
+        scale = cell.block_scale * (4.0 / 3.0)
+        blockref = wrapper.add_blockref(
+            block_name,
+            insert,
+            dxfattribs={
+                "color": 0,
+                "transparency": 16777216,
+                "xscale": scale,
+                "yscale": scale,
+                "zscale": scale,
+            },
+        )
+        blockref.set_xdata("ACAD", [(1000, "_DRAW_ANNO")])
+        block = self.doc.blocks.get(block_name)
+        attdefs = {attdef.dxf.tag: attdef for attdef in block.attdefs()}
+        for attrib in cell.block_attributes:
+            entity = self.doc.entitydb.get(attrib.handle)
+            if entity is None:
+                continue
+            tag = entity.dxf.get("tag")
+            if tag not in attdefs:
+                continue
+            attdef = attdefs[tag]
+            dxfattribs = attdef.dxfattribs(drop={"prompt", "handle", "owner"})
+            location = Vec3(dxfattribs.pop("insert")) * scale + insert
+            dxfattribs["height"] = float(dxfattribs.get("height", 2.5)) * scale
+            attached = blockref.add_attrib(tag, attrib.text, location, dxfattribs)
+            attached.dxf.lock_position = 0
+            setattr(attached, "_force_optional_version_tag", True)
+        if blockref.seqend is not None:
+            blockref.seqend.dxf.color = 0
+            blockref.seqend.dxf.transparency = 16777216
+        cell.wrapper_block_record_handle = wrapper.block_record_handle
 
     def _sync_linked_table_content(self) -> None:
         if self.doc is None or self.data is None:
@@ -1759,17 +1914,45 @@ class AcadTableBlockContent(DXFTagStorage):
             return
         xrecord = self._get_or_create_roundtrip_xrecord()
         table_content = self._get_or_create_table_content(xrecord)
+        self._get_or_create_table_geometry(xrecord)
+        self._ensure_table_style_roundtrip_support()
         table_content.table_style_handle = self.dxf.get("table_style_id")
-        table_content.linked_data = _make_linked_table_data(self.data)
+        table_content.linked_data = _make_linked_table_data(self)
         self.linked_data = table_content.linked_data
+
+    def _ensure_table_style_roundtrip_support(self) -> None:
+        style = self.get_table_style()
+        if style is None or self.doc is None:
+            return
+        reactors = set(style.get_reactors())
+        owner_dict_handle = self.doc.rootdict.get_required_dict("ACAD_TABLESTYLE").dxf.handle
+        reactors.add(owner_dict_handle)
+        if self.dxf.handle is not None:
+            reactors.add(self.dxf.handle)
+        style.set_reactors(sorted(reactors))
+        xdict = style.get_extension_dict() if style.has_extension_dict else style.new_extension_dict()
+        support_dict = xdict.dictionary
+        cell_style_map = support_dict.get("ACAD_ROUNDTRIP_2008_TABLESTYLE_CELLSTYLEMAP")
+        if not isinstance(cell_style_map, CellStyleMap):
+            cell_style_map = self.doc.objects.new_entity(
+                "CELLSTYLEMAP", {"owner": support_dict.dxf.handle}
+            )
+            support_dict.add("ACAD_ROUNDTRIP_2008_TABLESTYLE_CELLSTYLEMAP", cell_style_map)
+        cell_style_map.dxf.owner = support_dict.dxf.handle
+        cell_style_map.set_reactors([support_dict.dxf.handle])
+        cell_style_map.data = copy.deepcopy(style.data if style.data is not None else _default_table_style_data())
+        if "Standard" in self.doc.styles:
+            cell_style_map.text_style_handle = self.doc.styles.get("Standard").dxf.handle
 
     def _get_or_create_roundtrip_xrecord(self):
         if self.doc is None:
             raise const.DXFStructureError("ACAD_TABLE requires a valid DXF document")
         xdict = self.get_extension_dict() if self.has_extension_dict else self.new_extension_dict()
-        xrecord = xdict.dictionary.get("ACAD_XREC_ROUNDTRIP")
+        owner_dict = xdict.dictionary
+        xrecord = owner_dict.get("ACAD_XREC_ROUNDTRIP")
         if xrecord is None:
             xrecord = xdict.add_xrecord("ACAD_XREC_ROUNDTRIP")
+        xrecord.set_reactors([owner_dict.dxf.handle])
         xrecord.reset(
             [
                 (102, "ACAD_ROUNDTRIP_2008_TABLE_ENTITY"),
@@ -1797,6 +1980,30 @@ class AcadTableBlockContent(DXFTagStorage):
         xrecord.tags = Tags(tags)
         table_content.dxf.owner = xrecord.dxf.handle
         return table_content
+
+    def _get_or_create_table_geometry(self, xrecord):
+        assert self.doc is not None and self.data is not None
+        geom_handle = None
+        for tag in xrecord.tags:
+            if tag.code == 361:
+                geom_handle = str(tag.value)
+                break
+        table_geometry = None
+        if geom_handle is not None:
+            entity = self.doc.entitydb.get(geom_handle)
+            if isinstance(entity, TableGeometry) and entity.is_alive:
+                table_geometry = entity
+        if table_geometry is None:
+            table_geometry = self.doc.objects.new_entity(
+                "TABLEGEOMETRY", {"owner": xrecord.dxf.handle}
+            )
+        table_geometry.dxf.owner = xrecord.dxf.handle
+        table_geometry.n_rows = self.data.n_rows
+        table_geometry.n_cols = self.data.n_cols
+        tags = [tag for tag in xrecord.tags if tag.code != 361]
+        tags.append(dxftag(361, table_geometry.dxf.handle))
+        xrecord.tags = Tags(tags)
+        return table_geometry
 
     def set_cell_fill_enabled(self, row: int, col: int, enabled: bool) -> AcadTableCell:
         cell = self.get_cell(row, col)
@@ -1875,8 +2082,6 @@ class AcadTableBlockContent(DXFTagStorage):
                 write_tag2(7, cell.text_style)
             if cell.text_height is not None:
                 write_tag2(140, cell.text_height)
-            if cell.alignment is not None:
-                write_tag2(170, cell.alignment)
             if cell.fill_color is not None:
                 write_tag2(63, cell.fill_color)
             if cell.fill_true_color is not None:
@@ -1884,9 +2089,16 @@ class AcadTableBlockContent(DXFTagStorage):
             if cell.fill_enabled is not None:
                 write_tag2(283, cell.fill_enabled)
             if cell.is_block_cell and cell.block_record_handle is not None:
-                write_tag2(340, cell.block_record_handle)
+                shell_block_handle = cell.block_record_handle
+                shell_block_attrib_count = cell.block_attribute_count
+                if cell.block_attributes and cell.wrapper_block_record_handle is not None:
+                    shell_block_handle = cell.wrapper_block_record_handle
+                    shell_block_attrib_count = 0
+                write_tag2(340, shell_block_handle)
                 write_tag2(144, cell.block_scale)
-                write_tag2(179, cell.block_attribute_count)
+                write_tag2(179, shell_block_attrib_count)
+            if cell.alignment is not None:
+                write_tag2(170, cell.alignment)
             write_tag2(92, 0)
             write_tag2(301, "CELL_VALUE")
             write_tag2(93, 1 if cell.is_block_cell else 6)
@@ -1933,7 +2145,10 @@ class AcadTableBlockContent(DXFTagStorage):
 
     def get_cell_block_attribs(self, row: int, col: int) -> dict[str, str]:
         cell = self.get_cell(row, col)
-        return self.resolve_block_attribute_tags(cell)
+        attribs = self.resolve_block_attribute_tags(cell)
+        if attribs:
+            return attribs
+        return self._resolve_geometry_block_attribute_tags(cell)
 
     def get_cell_field(self, row: int, col: int):
         from .dxfobj import Field
@@ -2013,6 +2228,42 @@ class AcadTableBlockContent(DXFTagStorage):
                 result[tag] = attrib.text
         return result
 
+    def _resolve_geometry_block_attribute_tags(self, cell: AcadTableCell) -> dict[str, str]:
+        insert = self._geometry_block_insert_for_cell(cell)
+        if insert is None or self.doc is None:
+            return {}
+        wrapper_insert = insert
+        if insert.dxf.name.startswith("*"):
+            wrapper_block = self.doc.blocks.get(insert.dxf.name)
+            nested_inserts = list(wrapper_block.query("INSERT"))
+            if not nested_inserts:
+                return {}
+            wrapper_insert = nested_inserts[0]
+        result: dict[str, str] = {}
+        for attrib in getattr(wrapper_insert, "attribs", []):
+            tag = attrib.dxf.get("tag")
+            text = attrib.dxf.get("text")
+            if isinstance(tag, str) and isinstance(text, str):
+                result[tag] = text
+        return result
+
+    def _geometry_block_insert_for_cell(self, cell: AcadTableCell):
+        if self.doc is None or self.data is None or not cell.is_block_cell:
+            return None
+        block_name = self.get_block_name()
+        if not block_name:
+            return None
+        geometry = self.doc.blocks.get(block_name)
+        inserts = list(geometry.query("INSERT"))
+        block_cells = [candidate for candidate in self.data.cells if candidate.is_block_cell]
+        try:
+            index = block_cells.index(cell)
+        except ValueError:
+            return None
+        if index >= len(inserts):
+            return None
+        return inserts[index]
+
     def get_linked_table_content_handle(self) -> Optional[str]:
         if not self.has_extension_dict or self.doc is None:
             return None
@@ -2076,6 +2327,9 @@ class AcadTableBlockContent(DXFTagStorage):
                 continue
             cell = self.data.cells[index]
             cell.linked_cell_contents = linked_cell.contents
+            cell.wrapper_block_record_handle = linked_cell.wrapper_block_record_handle
+            cell.wrapper_margin_x = linked_cell.wrapper_margin_x
+            cell.wrapper_margin_y = linked_cell.wrapper_margin_y
             for content in linked_cell.contents:
                 if content.is_block_content:
                     if content.block_record_handle is not None:
@@ -2201,7 +2455,9 @@ def _default_linked_row_format() -> AcadTableFormat:
     return AcadTableFormat(kind="ROWTABLEFORMAT", flags90=2, alignment=0)
 
 
-def _default_text_content_format() -> AcadTableContentFormat:
+def _default_text_content_format(
+    *, style_handle: str = "0", display_height: float = 0.18
+) -> AcadTableContentFormat:
     return AcadTableContentFormat(
         flags90=0,
         flags91=0,
@@ -2212,12 +2468,30 @@ def _default_text_content_format() -> AcadTableContentFormat:
         text_height=1.0,
         unknown94=1,
         color62=0,
-        style_handle="0",
-        block_scale=0.18,
+        style_handle=style_handle,
+        block_scale=display_height,
     )
 
 
-def _default_block_content_format() -> AcadTableContentFormat:
+def _default_block_label_content_format(
+    *, style_handle: str = "0", display_height: float = 4.5
+) -> AcadTableContentFormat:
+    return AcadTableContentFormat(
+        flags90=3,
+        flags91=0,
+        flags92=4,
+        flags93=0,
+        format_string="",
+        margin=0.0,
+        text_height=1.0,
+        unknown94=1,
+        color62=0,
+        style_handle=style_handle,
+        block_scale=display_height,
+    )
+
+
+def _default_block_content_format(*, block_scale: float = 1.0) -> AcadTableContentFormat:
     return AcadTableContentFormat(
         flags90=264,
         flags91=256,
@@ -2225,7 +2499,7 @@ def _default_block_content_format() -> AcadTableContentFormat:
         flags93=0,
         format_string="",
         margin=0.0,
-        text_height=1.0,
+        text_height=block_scale,
         unknown94=1,
         color62=0,
         style_handle="0",
@@ -2248,6 +2522,33 @@ def _default_text_cell_format(alignment: int = 1) -> AcadTableFormat:
     )
 
 
+def _default_attributed_text_cell_format(alignment: int = 1) -> AcadTableFormat:
+    return AcadTableFormat(
+        kind="CELLTABLEFORMAT",
+        flags90=1,
+        alignment=alignment,
+        flags91=0,
+        flags92=0,
+        color62=257,
+        flags93=1,
+        table_cell_type171=0,
+        flags94=0,
+        content_format=AcadTableContentFormat(
+            flags90=0,
+            flags91=0,
+            flags92=512,
+            flags93=0,
+            format_string="",
+            margin=0.0,
+            text_height=1.0,
+            unknown94=5,
+            color62=0,
+            style_handle="0",
+            block_scale=0.18,
+        ),
+    )
+
+
 def _default_block_cell_format(alignment: int = 1) -> AcadTableFormat:
     return AcadTableFormat(
         kind="CELLTABLEFORMAT",
@@ -2259,12 +2560,15 @@ def _default_block_cell_format(alignment: int = 1) -> AcadTableFormat:
         flags93=1,
         table_cell_type171=0,
         flags94=0,
-        content_format=_default_block_content_format(),
+        content_format=_default_text_content_format(),
     )
 
 
-def _make_linked_table_data(data: AcadTableData) -> AcadTableLinkedData:
+def _make_linked_table_data(table: AcadTableBlockContent) -> AcadTableLinkedData:
+    data = table.data
+    assert data is not None
     linked = AcadTableLinkedData(n_rows=data.n_rows, n_cols=data.n_cols)
+    has_attributed_block_cells = any(cell.block_attributes for cell in data.cells)
     linked.columns = [
         AcadTableLinkedColumn(index=index, width=width, table_format=_default_linked_column_format())
         for index, width in enumerate(data.col_widths)
@@ -2283,15 +2587,59 @@ def _make_linked_table_data(data: AcadTableData) -> AcadTableLinkedData:
                 block_scale=cell.block_scale,
                 alignment=cell.alignment,
                 block_attributes=list(cell.block_attributes),
+                content_format=_default_block_content_format(block_scale=4.0 / 3.0),
             )
             contents = [block_content]
             if cell.block_attributes:
-                contents = [AcadTableLinkedCellContent(content_type=1, text=cell.text), block_content]
+                style_bucket = table.get_row_style_bucket(cell.row)
+                style_name = style_bucket.text_style if style_bucket is not None else "Standard"
+                style_handle = "0"
+                display_height = style_bucket.text_height if style_bucket is not None else 4.5
+                if table.doc is not None and style_name in table.doc.styles:
+                    style_handle = table.doc.styles.get(style_name).dxf.handle
+                contents = [
+                    AcadTableLinkedCellContent(
+                        content_type=1,
+                        text=cell.linked_text,
+                        content_format=_default_block_label_content_format(
+                            style_handle=style_handle,
+                            display_height=display_height,
+                        ),
+                    ),
+                    block_content,
+                ]
             table_format = _default_block_cell_format(cell.alignment or 1)
             raw91 = 1
         else:
-            contents = [AcadTableLinkedCellContent(content_type=1, text=cell.text)]
+            style_bucket = table.get_row_style_bucket(cell.row)
+            style_name = style_bucket.text_style if style_bucket is not None else "Standard"
+            style_handle = "0"
+            display_height = style_bucket.text_height if style_bucket is not None else 4.5
+            if table.doc is not None and style_name in table.doc.styles:
+                style_handle = table.doc.styles.get(style_name).dxf.handle
+            content_format = _default_text_content_format()
             table_format = _default_text_cell_format(cell.alignment or 1)
+            if has_attributed_block_cells:
+                if cell.row == 0:
+                    header_bucket = table.get_table_style().header_style if table.get_table_style() is not None else None
+                    if header_bucket is not None:
+                        display_height = header_bucket.text_height
+                elif cell.row == 1:
+                    data_bucket = table.get_table_style().data_style if table.get_table_style() is not None else None
+                    if data_bucket is not None:
+                        display_height = data_bucket.text_height
+                content_format = _default_block_label_content_format(
+                    style_handle=style_handle,
+                    display_height=display_height,
+                )
+                table_format = _default_attributed_text_cell_format(cell.alignment or 1)
+            contents = [
+                AcadTableLinkedCellContent(
+                    content_type=1,
+                    text=cell.text,
+                    content_format=content_format,
+                )
+            ]
             raw91 = 0
         linked.cells.append(
             AcadTableLinkedCell(
@@ -2301,6 +2649,8 @@ def _make_linked_table_data(data: AcadTableData) -> AcadTableLinkedData:
                 table_format=table_format,
                 raw_table_flags90=0,
                 raw_table_flags91=raw91,
+                wrapper_block_record_handle=cell.wrapper_block_record_handle,
+                wrapper_block_name=cell.wrapper_block_name,
             )
         )
     return linked
@@ -2316,7 +2666,7 @@ def _export_linked_table_data(
     write_tag2(90, linked.n_cols)
     for column in linked.columns:
         _export_linked_table_column(tagwriter, column)
-    rows = linked.rows() if linked.n_rows and linked.n_cols else [linked.cells]
+    write_tag2(91, len(rows := (linked.rows() if linked.n_rows and linked.n_cols else [linked.cells])))
     for row_index, cells in enumerate(rows):
         _export_linked_table_row(
             tagwriter,
@@ -2362,7 +2712,6 @@ def _export_linked_table_row(
     cells: Sequence[AcadTableLinkedCell],
 ) -> None:
     write_tag2 = tagwriter.write_tag2
-    write_tag2(91, max(len(cells), 0) + 0)
     write_tag2(301, "ROW")
     write_tag2(1, "LINKEDTABLEDATAROW_BEGIN")
     write_tag2(90, 1)
@@ -2390,23 +2739,119 @@ def _export_linked_table_cell(tagwriter: AbstractTagWriter, cell: AcadTableLinke
     write_tag2(91, 0)
     write_tag2(301, "CUSTOMDATA")
     write_tag2(1, "DATAMAP_BEGIN")
-    write_tag2(90, 0)
+    checksum = _linked_cell_checksum(cell)
+    if checksum is None:
+        write_tag2(90, 0)
+    else:
+        write_tag2(90, 1)
+        write_tag2(300, "ACAD_ROUNDTRIP_2008_CELL_CHECKSUM")
+        write_tag2(301, "DATAMAP_VALUE")
+        write_tag2(93, 2)
+        write_tag2(90, 2)
+        write_tag2(140, checksum)
+        write_tag2(94, 0)
+        write_tag2(300, "")
+        write_tag2(302, "")
+        write_tag2(304, "ACVALUE_END")
     write_tag2(309, "DATAMAP_END")
     write_tag2(92, 0)
     write_tag2(95, len(cell.contents))
     for content in cell.contents:
         write_tag2(302, "CONTENT")
-        _export_linked_cell_content(tagwriter, content)
+        content_format = content.content_format or _default_text_content_format()
+        _export_linked_cell_content(tagwriter, content, content_format=content_format)
     write_tag2(309, "LINKEDTABLEDATACELL_END")
-    _export_formatted_table_format(tagwriter, cell.table_format or _default_text_cell_format(), "FORMATTEDTABLEDATACELL_BEGIN")
+    table_format = cell.table_format or _default_text_cell_format()
+    if _use_rich_text_cell_wrapper(cell, table_format):
+        _export_rich_text_cell_table_format(tagwriter, cell, table_format)
+    else:
+        _export_formatted_table_format(tagwriter, table_format, "FORMATTEDTABLEDATACELL_BEGIN")
     write_tag2(1, "TABLECELL_BEGIN")
     write_tag2(90, cell.raw_table_flags90 or 0)
     write_tag2(91, cell.raw_table_flags91 or 0)
+    if cell.wrapper_block_record_handle is not None:
+        write_tag2(91, 0)
+        write_tag2(40, 0.0)
+        write_tag2(41, 0.0)
+        write_tag2(330, cell.wrapper_block_record_handle)
     write_tag2(92, 0)
     write_tag2(309, "TABLECELL_END")
 
 
-def _export_linked_cell_content(tagwriter: AbstractTagWriter, content: AcadTableLinkedCellContent) -> None:
+def _linked_cell_checksum(cell: AcadTableLinkedCell) -> Optional[float]:
+    if len(cell.contents) != 1 or cell.contents[0].content_type != 1:
+        return None
+    table_format = cell.table_format
+    if table_format is None or table_format.content_format is None:
+        return None
+    if table_format.content_format.unknown94 != 5:
+        return None
+    return 84.0 if cell.row == 0 else 72.0
+
+
+def _use_rich_text_cell_wrapper(cell: AcadTableLinkedCell, table_format: AcadTableFormat) -> bool:
+    if len(cell.contents) != 1 or cell.contents[0].content_type != 1:
+        return False
+    content_format = table_format.content_format
+    if content_format is None or content_format.unknown94 != 5:
+        return False
+    return cell.row in (0, 1)
+
+
+def _export_rich_text_cell_table_format(
+    tagwriter: AbstractTagWriter,
+    cell: AcadTableLinkedCell,
+    table_format: AcadTableFormat,
+) -> None:
+    write_tag2 = tagwriter.write_tag2
+    write_tag2(1, "FORMATTEDTABLEDATACELL_BEGIN")
+    write_tag2(300, table_format.kind)
+    write_tag2(1, "TABLEFORMAT_BEGIN")
+    write_tag2(90, table_format.flags90)
+    if table_format.alignment is not None:
+        write_tag2(170, table_format.alignment)
+    write_tag2(91, table_format.flags91)
+    write_tag2(92, table_format.flags92)
+    if table_format.color62 is not None:
+        write_tag2(62, table_format.color62)
+    write_tag2(93, table_format.flags93)
+    content_format = table_format.content_format
+    assert content_format is not None
+    write_tag2(300, "CONTENTFORMAT")
+    write_tag2(1, "CONTENTFORMAT_BEGIN")
+    _export_content_format(tagwriter, content_format)
+    write_tag2(309, "CONTENTFORMAT_END")
+    write_tag2(171, 1)
+    write_tag2(301, "MARGIN")
+    write_tag2(1, "CELLMARGIN_BEGIN")
+    for value in (1.5, 1.5, 1.5, 1.5, 0.18, 0.18):
+        write_tag2(40, value)
+    write_tag2(309, "CELLMARGIN_END")
+    flags94 = 6 if cell.row == 0 else 5
+    write_tag2(94, flags94)
+    masks = (1, 2, 4, 8, 16, 32) if cell.row == 0 else (2, 4, 8, 16, 32)
+    for mask in masks:
+        write_tag2(95, mask)
+        write_tag2(302, "GRIDFORMAT")
+        write_tag2(1, "GRIDFORMAT_BEGIN")
+        write_tag2(90, 37)
+        write_tag2(91, 1)
+        write_tag2(62, 0)
+        write_tag2(92, -2)
+        write_tag2(340, "0")
+        write_tag2(93, 0)
+        write_tag2(40, 0.045)
+        write_tag2(309, "GRIDFORMAT_END")
+    write_tag2(309, "TABLEFORMAT_END")
+    write_tag2(309, "FORMATTEDTABLEDATACELL_END")
+
+
+def _export_linked_cell_content(
+    tagwriter: AbstractTagWriter,
+    content: AcadTableLinkedCellContent,
+    *,
+    content_format: AcadTableContentFormat,
+) -> None:
     write_tag2 = tagwriter.write_tag2
     write_tag2(1, "CELLCONTENT_BEGIN")
     write_tag2(90, content.content_type)
@@ -2433,10 +2878,7 @@ def _export_linked_cell_content(tagwriter: AbstractTagWriter, content: AcadTable
     write_tag2(170, 1)
     write_tag2(300, "CONTENTFORMAT")
     write_tag2(1, "CONTENTFORMAT_BEGIN")
-    _export_content_format(
-        tagwriter,
-        _default_block_content_format() if content.is_block_content else _default_text_content_format(),
-    )
+    _export_content_format(tagwriter, content_format)
     write_tag2(309, "CONTENTFORMAT_END")
     write_tag2(309, "FORMATTEDCELLCONTENT_END")
 
@@ -2469,6 +2911,82 @@ def _export_formatted_table_format(
         write_tag2(94, table_format.flags94)
     write_tag2(309, "TABLEFORMAT_END")
     write_tag2(309, marker_begin.replace("BEGIN", "END"))
+
+
+def _export_cell_style_map_data(
+    tagwriter: AbstractTagWriter,
+    data: TableStyleData,
+    *,
+    text_style_handle: str,
+) -> None:
+    write_tag2 = tagwriter.write_tag2
+
+    def export_grid_formats() -> None:
+        for mask in (1, 2, 4, 8, 16, 32):
+            write_tag2(95, mask)
+            write_tag2(302, "GRIDFORMAT")
+            write_tag2(1, "GRIDFORMAT_BEGIN")
+            write_tag2(90, 0)
+            write_tag2(91, 1)
+            write_tag2(62, 0)
+            write_tag2(92, -2)
+            write_tag2(340, "0")
+            write_tag2(93, 0)
+            write_tag2(40, 0.045)
+            write_tag2(309, "GRIDFORMAT_END")
+
+    def export_cell_style(name: str, height: float, unknown94: int, style90: int, style91: int, style92: int) -> None:
+        write_tag2(300, "CELLSTYLE")
+        write_tag2(1, "TABLEFORMAT_BEGIN")
+        write_tag2(90, style90)
+        write_tag2(170, 1)
+        write_tag2(91, style91)
+        write_tag2(92, style92)
+        write_tag2(62, 257)
+        write_tag2(93, 1)
+        write_tag2(300, "CONTENTFORMAT")
+        write_tag2(1, "CONTENTFORMAT_BEGIN")
+        write_tag2(90, 0)
+        write_tag2(91, 0)
+        write_tag2(92, 512)
+        write_tag2(93, 0)
+        write_tag2(300, "")
+        write_tag2(40, 0.0)
+        write_tag2(140, 1.0)
+        write_tag2(94, unknown94)
+        write_tag2(62, 0)
+        write_tag2(340, text_style_handle)
+        write_tag2(144, height)
+        write_tag2(309, "CONTENTFORMAT_END")
+        write_tag2(171, 1)
+        write_tag2(301, "MARGIN")
+        write_tag2(1, "CELLMARGIN_BEGIN")
+        for value in (
+            data.horizontal_cell_margin,
+            data.horizontal_cell_margin,
+            data.vertical_cell_margin,
+            data.vertical_cell_margin,
+            0.18,
+            0.18,
+        ):
+            write_tag2(40, value)
+        write_tag2(309, "CELLMARGIN_END")
+        write_tag2(94, 6)
+        export_grid_formats()
+        write_tag2(309, "TABLEFORMAT_END")
+        write_tag2(1, "CELLSTYLE_BEGIN")
+        write_tag2(90, style90 - 4)
+        write_tag2(91, style91 + 1)
+        write_tag2(300, name)
+        write_tag2(309, "CELLSTYLE_END")
+
+    header_height = data.header_style.text_height if data.header_style is not None else 6.0
+    data_height = data.data_style.text_height if data.data_style is not None else 4.5
+    title_height = data.title_style.text_height if data.title_style is not None else 4.5
+    write_tag2(90, 3)
+    export_cell_style("_TITLE", header_height, 5, 5, 0, 32768)
+    export_cell_style("_HEADER", data_height, 5, 6, 0, 0)
+    export_cell_style("_DATA", title_height, 2, 7, 1, 0)
 
 
 def _export_content_format(tagwriter: AbstractTagWriter, content: AcadTableContentFormat) -> None:

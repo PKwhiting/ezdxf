@@ -110,6 +110,8 @@ from .acad_table import (
     AcadTableLinkedData,
     AcadTableBlockContent,
     TableContent,
+    CellStyleMap,
+    TableGeometry,
     TableStyle,
     TableStyleCellStyle,
     TableStyleData,

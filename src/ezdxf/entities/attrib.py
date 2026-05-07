@@ -219,6 +219,7 @@ class BaseAttrib(Text):
         # Does subclass AcDbXrecord really exist?
         self._xrecord: Optional[Tags] = None
         self._embedded_mtext: Optional[EmbeddedMText] = None
+        self._force_optional_version_tag = False
 
     def copy_data(self, entity: Self, copy_strategy=default_copy) -> None:
         """Copy entity data, xrecord data and embedded MTEXT are not stored
@@ -227,6 +228,7 @@ class BaseAttrib(Text):
         assert isinstance(entity, BaseAttrib)
         entity._xrecord = copy.deepcopy(self._xrecord)
         entity._embedded_mtext = copy.deepcopy(self._embedded_mtext)
+        entity._force_optional_version_tag = self._force_optional_version_tag
 
     def load_embedded_mtext(self, processor: SubclassProcessor) -> None:
         if not processor.embedded_objects:
@@ -238,6 +240,14 @@ class BaseAttrib(Text):
             self._embedded_mtext = mtext
 
     def export_dxf_r2018_features(self, tagwriter: AbstractTagWriter) -> None:
+        has_r2018_features = (
+            self._xrecord is not None
+            or self._embedded_mtext is not None
+            or self.dxf.hasattr("align_point")
+            or self.dxf.attribute_type != const.ATTRIB_TYPE_SINGLE_LINE
+        )
+        if not has_r2018_features:
+            return
         tagwriter.write_tag2(71, self.dxf.attribute_type)
         tagwriter.write_tag2(72, 0)  # unknown tag
         if self.dxf.hasattr("align_point"):
@@ -491,6 +501,8 @@ class AttDef(BaseAttrib):
     def export_acdb_attdef(self, tagwriter: AbstractTagWriter) -> None:
         if tagwriter.dxfversion > const.DXF12:
             tagwriter.write_tag2(const.SUBCLASS_MARKER, acdb_attdef.name)
+        if tagwriter.dxfversion >= const.DXF2010 and self._force_optional_version_tag:
+            tagwriter.write_tag2(280, 0)
         self.dxf.export_dxf_attribs(
             tagwriter,
             [
@@ -500,9 +512,12 @@ class AttDef(BaseAttrib):
                 "flags",
                 "field_length",
                 "valign",
-                "lock_position",
             ],
         )
+        if tagwriter.dxfversion >= const.DXF2007 and (
+            self._force_optional_version_tag or self.dxf.hasattr("lock_position")
+        ):
+            tagwriter.write_tag2(280, self.dxf.get("lock_position", 0))
 
 
 @register_entity
@@ -564,6 +579,8 @@ class Attrib(BaseAttrib):
     def export_acdb_attrib(self, tagwriter: AbstractTagWriter) -> None:
         if tagwriter.dxfversion > const.DXF12:
             tagwriter.write_tag2(const.SUBCLASS_MARKER, acdb_attrib.name)
+        if tagwriter.dxfversion >= const.DXF2010 and self._force_optional_version_tag:
+            tagwriter.write_tag2(280, 0)
         self.dxf.export_dxf_attribs(
             tagwriter,
             [
@@ -572,9 +589,12 @@ class Attrib(BaseAttrib):
                 "flags",
                 "field_length",
                 "valign",
-                "lock_position",
             ],
         )
+        if tagwriter.dxfversion >= const.DXF2007 and (
+            self._force_optional_version_tag or self.dxf.hasattr("lock_position")
+        ):
+            tagwriter.write_tag2(280, self.dxf.get("lock_position", 0))
 
 
 IGNORE_FROM_ATTRIB = {

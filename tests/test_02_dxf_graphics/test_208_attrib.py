@@ -303,6 +303,15 @@ def test_version_without_lock_position():
     assert attrib.dxf.lock_position == 7
 
 
+def test_single_line_attrib_export_omits_r2018_feature_tags():
+    attrib = Attrib.new(dxfattribs={"tag": "TAG1", "text": "X", "insert": (0, 0)})
+
+    tags = TagCollector.dxftags(attrib, dxfversion=ezdxf.const.DXF2018)
+
+    assert 71 not in [tag.code for tag in tags]
+    assert 72 not in [tag.code for tag in tags]
+
+
 def test_audit_destroys_attrib_without_tag_attribute(doc):
     # Unbound entities cannot be audited!
     attrib = Attrib.new()

@@ -235,6 +235,8 @@ complete content is stored in the first row. All cells contain strings.
       and alignment
     - linked block-cell attribute payloads through the associated `TABLECONTENT`
       object, when present
+    - wrapper-geometry fallback resolution for block-cell `ATTRIB` values kept by
+      AutoCAD after linked attributed payload normalization
     - typed access to the associated `TABLESTYLE` object through the loaded
       `TABLESTYLE` entity and the document collection `doc.table_styles`
 
@@ -255,7 +257,9 @@ complete content is stored in the first row. All cells contain strings.
 
     Block-cell payloads can also be queried from loaded tables. For example,
     if a block cell contains ATTDEF-backed values stored in linked table
-    content, the resolved tag/value mapping for a cell can be obtained by::
+    content, or if AutoCAD has normalized those values into wrapper-block
+    `ATTRIB` entities after a save, the resolved tag/value mapping for a cell can
+    be obtained by::
 
         cell = acad_table.get_cell(2, 0)
         attribs = acad_table.get_cell_block_attribs(2, 0)

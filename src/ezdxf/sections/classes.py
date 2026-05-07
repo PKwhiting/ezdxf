@@ -133,6 +133,7 @@ CLASS_DEFINITIONS = {
     "SORTENTSTABLE": ["AcDbSortentsTable", "ObjectDBX Classes", 0, 0, 0],
     "ACAD_TABLE": ["AcDbTable", "ObjectDBX Classes", 1025, 0, 1],
     "TABLECONTENT": ["AcDbTableContent", "ObjectDBX Classes", 1152, 0, 0],
+    "TABLEGEOMETRY": ["AcDbTableGeometry", "ObjectDBX Classes", 1152, 0, 0],
     "ARC_DIMENSION": ["AcDbArcDimension", "ObjectDBX Classes", 1025, 0, 1],
     "LARGE_RADIAL_DIMENSION": [
         "AcDbRadialDimensionLarge",

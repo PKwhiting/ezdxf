@@ -2,8 +2,10 @@
 # License: MIT License
 import ezdxf
 import pytest
+from io import StringIO
 from ezdxf.lldxf.tagwriter import TagCollector
 from ezdxf.lldxf import const
+from ezdxf.lldxf.tagger import ascii_tags_loader
 
 from ezdxf.entities.acad_table import (
     AcadTableBlockAttributeValue,
@@ -912,6 +914,32 @@ def test_reads_local_fill_true_color_override_tags():
     assert cell.fill_enabled == 0
 
 
+def test_reads_ui_authored_attributed_block_cell_wrapper_metadata():
+    doc = ezdxf.readfile(
+        r"C:\Users\solar\Desktop\CAD_TESTING\experiments\acad-table-diffs\acad_table_014_true_block_cell_with_attribs_ui_minimal.dxf"
+    )
+    table = doc.modelspace().query("ACAD_TABLE")[0]
+    linked = table.load_linked_data()
+
+    assert linked is not None
+    cell = table.get_cell(2, 0)
+    linked_cell = linked.cells[-1]
+
+    assert linked_cell.wrapper_block_record_handle is not None
+    assert cell.wrapper_block_record_handle == linked_cell.wrapper_block_record_handle
+    assert linked_cell.wrapper_margin_x == 0.0
+    assert linked_cell.wrapper_margin_y == 0.0
+
+
+def test_resolves_saved_attributed_block_cell_values_from_wrapper_geometry():
+    doc = ezdxf.readfile(
+        r"C:\Users\solar\Desktop\CAD_TESTING\experiments\acad-table-diffs\validate-ezdxf-text-table-validation-block-cell-attribs-v15\before.dxf"
+    )
+    table = doc.modelspace().query("ACAD_TABLE")[4]
+
+    assert table.get_cell_block_attribs(2, 0) == {"TAG1": "X", "TAG2": "Y"}
+
+
 def test_reads_minimal_block_cell_structure():
     table = load_table(BLOCK_CELL_TABLE)
     cell = table.get_cell(2, 0)
@@ -1280,13 +1308,13 @@ def test_exports_minimal_block_cell_and_rebuilds_geometry():
 
 def test_block_cell_attribs_create_authored_linked_tablecontent():
     doc = ezdxf.new("R2018")
-    block = doc.blocks.new("TABLE_BLOCK_CELL_ATTR", base_point=(0, 0))
-    block.add_lwpolyline([(0, 0), (3, 0), (3, 2), (0, 2)], close=True)
-    block.add_attdef("ONE", insert=(0.5, 0.5), text="ONE")
-    block.add_attdef("TWO", insert=(2.5, 1.5), text="TWO")
-    table = doc.modelspace().add_table((0, 0), [["T"], ["H"], [""]])
-    table.set_cell_block(2, 0, "TABLE_BLOCK_CELL_ATTR", block_scale=1.0, alignment=1)
-    table.set_cell_block_attribs(2, 0, {"ONE": "X", "TWO": "Y"})
+    block = doc.blocks.new("TABLE_BLOCK_CELL_ATTRIB_UI", base_point=(0, 0))
+    block.add_lwpolyline([(0, 0), (6, 0), (6, 3), (0, 3)], close=True)
+    block.add_attdef("TAG1", insert=(0.5, 0.5), text="A")
+    block.add_attdef("TAG2", insert=(5.0, 2.0), text="B")
+    table = doc.modelspace().add_table((0, 0), [["T"], ["H"], ["D"]])
+    table.set_cell_block(2, 0, "TABLE_BLOCK_CELL_ATTRIB_UI", block_scale=1.0, alignment=1)
+    table.set_cell_block_attribs(2, 0, {"TAG1": "X", "TAG2": "Y"})
 
     table_content = table.get_linked_table_content()
 
@@ -1296,7 +1324,22 @@ def test_block_cell_attribs_create_authored_linked_tablecontent():
     assert linked is not None
     cell = table.get_cell(2, 0)
     assert cell.has_block_attributes is True
-    assert table.get_cell_block_attribs(2, 0) == {"ONE": "X", "TWO": "Y"}
+    assert table.get_cell_block_attribs(2, 0) == {"TAG1": "X", "TAG2": "Y"}
+    linked_cell = linked.get_cell(2, 0)
+    assert len(linked_cell.contents) == 2
+    assert linked_cell.contents[0].content_format is not None
+    assert linked_cell.contents[0].content_format.flags90 == 3
+    assert linked_cell.contents[0].content_format.flags92 == 4
+    first_text_cell = linked.get_cell(0, 0)
+    assert first_text_cell.contents[0].content_format is not None
+    assert first_text_cell.contents[0].content_format.flags90 == 3
+    assert first_text_cell.contents[0].content_format.block_scale == 6.0
+    second_text_cell = linked.get_cell(1, 0)
+    assert second_text_cell.contents[0].content_format is not None
+    assert second_text_cell.contents[0].content_format.block_scale == 4.5
+    assert first_text_cell.table_format is not None
+    assert first_text_cell.table_format.content_format is not None
+    assert first_text_cell.table_format.content_format.unknown94 == 5
 
     xrecord = table.get_extension_dict().dictionary.get("ACAD_XREC_ROUNDTRIP")
     assert xrecord is not None
@@ -1311,7 +1354,63 @@ def test_block_cell_attribs_create_authored_linked_tablecontent():
     exported_330 = [tag.value for tag in exported.find_all(330)]
     assert attdef_handles[0] in exported_330
     assert attdef_handles[1] in exported_330
+    assert "D" in [tag.value for tag in exported.find_all(1)]
     assert [tag.value for tag in exported.find_all(301) if tag.value in ("X", "Y")] == ["X", "Y"]
+    assert "ACAD_ROUNDTRIP_2008_CELL_CHECKSUM" in [tag.value for tag in exported.find_all(300)]
+    assert "CELLMARGIN_BEGIN" in [tag.value for tag in exported.find_all(1)]
+    assert "GRIDFORMAT_BEGIN" in [tag.value for tag in exported.find_all(1)]
+    exported_140 = [tag.value for tag in exported.find_all(140)]
+    assert 84.0 in exported_140
+    assert 72.0 in exported_140
+
+    stream = StringIO()
+    doc.write(stream)
+    drawing_tags = Tags(list(ascii_tags_loader(StringIO(stream.getvalue()))))
+
+    def exported_entity_tags(dxftype: str, tag_name: str | None = None) -> list:
+        for index, tag in enumerate(drawing_tags):
+            if tag.code == 0 and tag.value == dxftype:
+                entity_tags = []
+                j = index
+                while j < len(drawing_tags):
+                    current = drawing_tags[j]
+                    if j > index and current.code == 0:
+                        break
+                    entity_tags.append(current)
+                    j += 1
+                if tag_name is None or any(t.code == 2 and t.value == tag_name for t in entity_tags):
+                    return entity_tags
+        return []
+
+    assert [tag.value for tag in exported_entity_tags("ATTDEF", "TAG1") if tag.code == 280] == ["0", "0"]
+    assert [tag.value for tag in exported_entity_tags("ATTDEF", "TAG2") if tag.code == 280] == ["0", "0"]
+    assert [tag.value for tag in exported_entity_tags("ATTRIB", "TAG1") if tag.code == 280] == ["0", "0"]
+    assert [tag.value for tag in exported_entity_tags("ATTRIB", "TAG2") if tag.code == 280] == ["0", "0"]
+    assert [tag.value for tag in exported_entity_tags("TABLEGEOMETRY") if tag.code == 100] == ["AcDbTableGeometry"]
+    assert [tag.value for tag in exported_entity_tags("CELLSTYLEMAP") if tag.code == 100] == ["AcDbCellStyleMap"]
+
+    style = doc.table_styles.get("Standard")
+    assert style is not None
+    assert table.dxf.handle in style.get_reactors()
+    assert style.has_extension_dict
+    style_dict = style.get_extension_dict().dictionary
+    assert "ACAD_ROUNDTRIP_2008_TABLESTYLE_CELLSTYLEMAP" in style_dict
+
+    table_tags = exported_entity_tags("ACAD_TABLE")
+    shell_340_values = [tag.value for tag in table_tags if tag.code == 340]
+    shell_179_values = [tag.value for tag in table_tags if tag.code == 179]
+    assert cell.wrapper_block_record_handle in shell_340_values
+    assert "0" in shell_179_values
+
+
+def test_add_table_sets_layout_owner():
+    doc = ezdxf.new("R2018")
+    msp = doc.modelspace()
+
+    table = msp.add_table((0, 0), [["T"], ["H"], ["D"]])
+
+    assert table.dxf.owner == msp.block_record_handle
+    assert table in msp
 
 
 def test_set_col_width_updates_export_and_geometry():

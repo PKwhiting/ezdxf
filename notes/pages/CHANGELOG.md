@@ -26,6 +26,7 @@
 		- preserves inline cell text formatting codes as stored by AutoCAD
 		- reads linked `TABLECONTENT` payloads for richer block-cell content, including ATTDEF-backed block-cell attribute values when present
 		- resolves ATTDEF-backed block-cell attribute payloads back to tag/value dictionaries for loaded tables
+		- falls back to wrapper-block `ATTRIB` entities when AutoCAD normalizes linked attributed block-cell payloads on save
 		- resolves text-cell `FIELD` handles back to loaded `FIELD` objects when present
 	- NEW: experimental text-only `ACAD_TABLE` authoring support
 		- adds `layout.add_table()` for text-only tables backed by an anonymous `*T` geometry block

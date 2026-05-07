@@ -28,8 +28,9 @@ Delete the existing MLEADER and create a new one.
 ACAD_TABLE Entity
 -----------------
 
-The current `ACAD_TABLE` support is intentionally small and limited to
-text-only tables authored by `ezdxf`, but basic content updates are supported.
+The current `ACAD_TABLE` support is intentionally small. It supports
+text-table authoring plus a validated minimal block-cell helper, while richer
+linked attributed block-cell authoring is still experimental.
 
 Create a text-only table by::
 
@@ -80,4 +81,9 @@ block cell without linked `TABLECONTENT` or block attributes::
 
 These helpers rebuild the anonymous `*T` geometry block automatically so the
 visible block content stays consistent with the semantic table shell.
+
+The higher-level `set_cell_block_attribs()` path can already create a DXF that
+AutoCAD accepts, but ATTDEF-backed values are still normalized by AutoCAD on the
+first save, so that attributed block-cell write path is not documented as fully
+stable yet.
 
