@@ -276,11 +276,17 @@ class Text(DXFGraphic):
         register_field_list: bool = False,
     ) -> Field:
         from .dxfobj import Field
+        from . import factory
 
         if not isinstance(field, Field):
             raise const.DXFTypeError(f"invalid DXF type: {field.dxftype()}")
         if self.doc is None:
             raise const.DXFStructureError("valid DXF document required")
+        if field.doc is None:
+            factory.bind(field, self.doc)
+            self.doc.objects.add_object(field)
+        elif field.doc is not self.doc:
+            raise const.DXFStructureError("field belongs to a different DXF document")
 
         final_text = text if text is not None else self.dxf.text
 

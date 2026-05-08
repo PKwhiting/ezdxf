@@ -2,6 +2,7 @@
 # License: MIT License
 import pytest
 import ezdxf
+from ezdxf.entities.dxfobj import Field
 from ezdxf.addons.dxf2code import (
     entities_to_code,
     table_entries_to_code,
@@ -575,6 +576,69 @@ def test_mtext_object_property_field_to_code():
     assert new_child.object_handles == [new_line.dxf.handle]
 
 
+def test_text_acexpr_field_to_code():
+    source_doc = ezdxf.new("R2010")
+    source_msp = source_doc.modelspace()
+    line = source_msp.add_line((0, 0), (10, 0))
+    circle = source_msp.add_circle((5, 0), radius=2.5)
+    child1 = Field()
+    child1.set_acobjprop(line, "Length", value=10.0, display="10.0000")
+    child2 = Field()
+    child2.set_acobjprop(circle, "Radius", value=2.5, display="2.5000")
+    txt = source_msp.add_text_acexpr_field(
+        "(%<\\_FldIdx 0>%*%<\\_FldIdx 1>%)",
+        [child1, child2],
+        value=25.0,
+        text="25.0000",
+        register_field_list=True,
+    )
+
+    _, new_msp = translate_entities_to_new_layout([line, circle, txt])
+    new_line = new_msp[0]
+    new_circle = new_msp[1]
+    new_text = new_msp[2]
+    new_expr = new_text.get_primary_field("TEXT")
+
+    assert new_expr is not None
+    assert new_expr.evaluator_id == "AcExpr"
+    assert new_expr.field_code == "\\AcExpr (%<\\_FldIdx 0>%*%<\\_FldIdx 1>%) \\f \"%lu2\""
+    children = new_expr.get_child_fields()
+    assert len(children) == 2
+    assert children[0].object_handles == [new_line.dxf.handle]
+    assert children[1].object_handles == [new_circle.dxf.handle]
+
+
+def test_mtext_acexpr_field_to_code():
+    source_doc = ezdxf.new("R2010")
+    source_msp = source_doc.modelspace()
+    line = source_msp.add_line((0, 0), (10, 0))
+    circle = source_msp.add_circle((5, 0), radius=2.5)
+    child1 = Field()
+    child1.set_acobjprop(line, "Length", value=10.0, display="10.0000")
+    child2 = Field()
+    child2.set_acobjprop(circle, "Radius", value=2.5, display="2.5000")
+    mtext = source_msp.add_mtext_acexpr_field(
+        "(%<\\_FldIdx 0>%*%<\\_FldIdx 1>%)",
+        [child1, child2],
+        value=25.0,
+        text="25.0000",
+        register_field_list=True,
+    )
+
+    _, new_msp = translate_entities_to_new_layout([line, circle, mtext])
+    new_line = new_msp[0]
+    new_circle = new_msp[1]
+    new_mtext = new_msp[2]
+    new_expr = new_mtext.get_primary_field("TEXT")
+
+    assert new_expr is not None
+    assert new_expr.evaluator_id == "AcExpr"
+    children = new_expr.get_child_fields()
+    assert len(children) == 2
+    assert children[0].object_handles == [new_line.dxf.handle]
+    assert children[1].object_handles == [new_circle.dxf.handle]
+
+
 def test_insert_attrib_field_to_code():
     source_doc = ezdxf.new("R2010")
     source_msp = source_doc.modelspace()
@@ -650,6 +714,45 @@ def test_multileader_field_to_code():
     assert new_child is not None
     assert new_child.field_code == child.field_code
     assert new_doc.objects.get_field_list() is not None
+
+
+def test_multileader_acexpr_field_to_code():
+    from ezdxf.render.mleader import ConnectionSide
+
+    source_doc = ezdxf.new("R2010")
+    source_msp = source_doc.modelspace()
+    line = source_msp.add_line((0, 0), (10, 0))
+    circle = source_msp.add_circle((5, 0), radius=2.5)
+    builder = source_msp.add_multileader_mtext()
+    builder.set_content("TEXT")
+    builder.add_leader_line(ConnectionSide.left, [Vec2(-5, 0), Vec2(-2, 0)])
+    builder.build(insert=Vec2(0, 0))
+    ml = builder.multileader
+    child1 = Field()
+    child1.set_acobjprop(line, "Length", value=10.0, display="10.0000")
+    child2 = Field()
+    child2.set_acobjprop(circle, "Radius", value=2.5, display="2.5000")
+    ml.new_acexpr_field(
+        "(%<\\_FldIdx 0>%*%<\\_FldIdx 1>%)",
+        [child1, child2],
+        value=25.0,
+        text="25.0000",
+        register_field_list=True,
+    )
+
+    _, new_msp = translate_entities_to_new_layout([line, circle, ml])
+    new_line = new_msp[0]
+    new_circle = new_msp[1]
+    new_ml = new_msp[2]
+    new_expr = new_ml.get_primary_field("TEXT")
+
+    assert new_ml.get_mtext_content() == "25.0000"
+    assert new_expr is not None
+    assert new_expr.evaluator_id == "AcExpr"
+    children = new_expr.get_child_fields()
+    assert len(children) == 2
+    assert children[0].object_handles == [new_line.dxf.handle]
+    assert children[1].object_handles == [new_circle.dxf.handle]
 
 
 def test_multileader_custom_style_to_code():
@@ -905,6 +1008,47 @@ def test_acad_table_minimal_block_cell_to_code():
     inserts = [entity for entity in new_table.virtual_entities() if entity.dxftype() == "INSERT"]
     assert len(inserts) == 1
     assert inserts[0].dxf.name == "TABLE_BLOCK_CELL_MIN"
+
+
+def test_acad_table_acexpr_field_to_code():
+    source_doc = ezdxf.new("R2018")
+    source_msp = source_doc.modelspace()
+    line = source_msp.add_line((0, 0), (10, 0))
+    circle = source_msp.add_circle((5, 0), radius=2.5)
+    table = source_msp.add_table(
+        (0, 0),
+        [["FIELD EXPR", "AUTHORED"], ["LABEL", "VALUE"], ["Length", "10.0000"], ["Radius", "2.5000"], ["Result", "25.0000"]],
+        col_widths=[30.0, 38.0],
+    )
+    table.new_cell_acobjprop_field(2, 1, line, "Length", text="10.0000", register_field_list=True)
+    table.new_cell_acobjprop_field(3, 1, circle, "Radius", text="2.5000", register_field_list=True)
+    child1 = Field()
+    child1.set_acobjprop(line, "Length", value=10.0, display="10.0000")
+    child2 = Field()
+    child2.set_acobjprop(circle, "Radius", value=2.5, display="2.5000")
+    table.new_cell_acexpr_field(
+        4,
+        1,
+        "(%<\\_FldIdx 0>%*%<\\_FldIdx 1>%)",
+        [child1, child2],
+        value=25.0,
+        text="25.0000",
+        register_field_list=True,
+    )
+
+    new_doc, new_msp = translate_entities_to_new_layout([line, circle, table])
+    new_line = new_msp[0]
+    new_circle = new_msp[1]
+    new_table = new_msp[2]
+    new_expr = new_table.get_cell_primary_field(4, 1)
+
+    assert new_expr is not None
+    assert new_expr.evaluator_id == "AcExpr"
+    children = new_expr.get_child_fields()
+    assert len(children) == 2
+    assert children[0].object_handles == [new_line.dxf.handle]
+    assert children[1].object_handles == [new_circle.dxf.handle]
+    assert new_table.get_cell_field(4, 1) is not None
 
 
 if __name__ == "__main__":

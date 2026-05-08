@@ -483,6 +483,45 @@ class _SourceCodeGenerator:
             return variable_name[len("CustomDP.") :]
         return None
 
+    @staticmethod
+    def _field_display_text(field) -> str:
+        for tag in reversed(field.tags):
+            if tag.code == 301:
+                return str(tag.value)
+        return ""
+
+    @staticmethod
+    def _field_has_eval_option(field) -> bool:
+        return any(
+            tag.code == 6 and tag.value == "ACAD_ROUNDTRIP_2008_FIELD_EVALOPTION"
+            for tag in field.tags
+        )
+
+    def _field_format(self, field) -> str:
+        tags = list(field.tags)
+        for index, tag in enumerate(tags):
+            if tag.code != 7 or tag.value != "ACFD_FIELD_VALUE":
+                continue
+            for value_tag in tags[index + 1 :]:
+                if value_tag.code == 300:
+                    return str(value_tag.value)
+                if value_tag.code == 304 and value_tag.value == "ACVALUE_END":
+                    break
+        return ""
+
+    def _acexpr_expression(self, field) -> Optional[str]:
+        code = field.field_code
+        prefix = "\\AcExpr "
+        if not code.startswith(prefix):
+            return None
+        expression = code[len(prefix) :]
+        field_format = self._field_format(field)
+        if field_format:
+            suffix = f' \\f "{field_format}"'
+            if expression.endswith(suffix):
+                expression = expression[: -len(suffix)]
+        return expression
+
     def _uses_field_list(self, wrapper, child) -> bool:
         doc = wrapper.doc
         if doc is None:
@@ -491,10 +530,7 @@ class _SourceCodeGenerator:
         if field_list is None:
             return False
         handles = set(field_list.handles)
-        return (
-            wrapper.dxf.handle in handles
-            or child.dxf.handle in handles
-        )
+        return any(field.dxf.handle in handles for field in wrapper.get_field_tree())
 
     def _format_field_tag_value(self, code: int, value: Any) -> Optional[str]:
         if code in (330, 331):
@@ -515,6 +551,74 @@ class _SourceCodeGenerator:
                 return None
             lines.append(f"    ({code}, {value_str}),")
         return lines
+
+    def _emit_field_custom_var_setup(self, field, field_var: str, host_var: str) -> None:
+        dwgprops_name = self._dwgprops_name(field)
+        if dwgprops_name is None:
+            return
+        dwgprops_value = self._read_field_value(field, 7, "ACFD_FIELD_VALUE")
+        if dwgprops_value is None:
+            dwgprops_value = ""
+        elif not isinstance(dwgprops_value, str):
+            dwgprops_value = str(dwgprops_value)
+        self.add_deferred_source_code_line(f"_custom_vars = {host_var}.doc.header.custom_vars")
+        self.add_deferred_source_code_line(
+            f"if _custom_vars.has_tag({json.dumps(dwgprops_name)}):"
+        )
+        self.add_deferred_source_code_line(
+            f"    _custom_vars.replace({json.dumps(dwgprops_name)}, {json.dumps(dwgprops_value)})"
+        )
+        self.add_deferred_source_code_line("else:")
+        self.add_deferred_source_code_line(
+            f"    _custom_vars.append({json.dumps(dwgprops_name)}, {json.dumps(dwgprops_value)})"
+        )
+
+    def _emit_field_construction(self, field, field_var: str, host_var: str) -> bool:
+        self.add_import_statement("from ezdxf.entities.dxfobj import Field")
+        child_fields = field.get_child_fields()
+        if len(child_fields):
+            if field.evaluator_id != "AcExpr":
+                return False
+            expression = self._acexpr_expression(field)
+            if expression is None:
+                return False
+            child_vars: list[str] = []
+            for index, child in enumerate(child_fields):
+                child_var = f"{field_var}_{index}"
+                if not self._emit_field_construction(child, child_var, host_var):
+                    return False
+                child_vars.append(child_var)
+            self.add_deferred_source_code_line(f"{field_var} = Field.build_acexpr(")
+            self.add_deferred_source_code_line(f"    {host_var}.doc,")
+            self.add_deferred_source_code_line(f"    {json.dumps(expression)},")
+            self.add_deferred_source_code_line(
+                f"    [{', '.join(child_vars)}],"
+            )
+            self.add_deferred_source_code_line(
+                f"    field_format={json.dumps(self._field_format(field) or '%lu2')},"
+            )
+            self.add_deferred_source_code_line(
+                f"    value={self._format_python_value(self._read_field_value(field, 7, 'ACFD_FIELD_VALUE'))},"
+            )
+            self.add_deferred_source_code_line(
+                f"    display={json.dumps(self._field_display_text(field))},"
+            )
+            self.add_deferred_source_code_line(
+                f"    include_eval_option={self._field_has_eval_option(field)},"
+            )
+            self.add_deferred_source_code_line(")")
+            return True
+
+        field_reset_source = self._field_reset_source(field)
+        if field_reset_source is None:
+            return False
+        self.add_deferred_source_code_line(f"{field_var} = Field()")
+        self.add_deferred_source_code_line(f"{field_var}.reset([")
+        self.add_deferred_source_code_lines(field_reset_source)
+        self.add_deferred_source_code_line("])"
+        )
+        self._emit_field_custom_var_setup(field, field_var, host_var)
+        return True
 
     def _format_python_value(self, value: Any) -> str:
         if isinstance(value, str):
@@ -781,17 +885,17 @@ class _SourceCodeGenerator:
                 )
                 continue
             child = child_fields[0]
-            field_reset_source = self._field_reset_source(child)
-            if field_reset_source is None:
+            self.add_deferred_source_code_line(
+                f'_host = _entity_map[{json.dumps(handle)}]'
+            )
+            if not self._emit_field_construction(child, "_field", "_host"):
                 self.add_deferred_source_code_line(
                     f'# unsupported hosted FIELD on {entity.dxftype()} key {json.dumps(key)}'
                 )
                 continue
+            self.add_deferred_source_code_line("_wrapper = _host.set_linked_field(")
             self.add_deferred_source_code_line(
-                f'_host = _entity_map[{json.dumps(handle)}]'
-            )
-            self.add_deferred_source_code_line(
-                "_child, _wrapper = _host.new_linked_field("
+                "    _field,"
             )
             self.add_deferred_source_code_line(
                 f"    key={json.dumps(key)},"
@@ -803,31 +907,6 @@ class _SourceCodeGenerator:
                 f"    register_field_list={self._uses_field_list(wrapper, child)},"
             )
             self.add_deferred_source_code_line(")")
-            dwgprops_name = self._dwgprops_name(child)
-            if dwgprops_name is not None:
-                dwgprops_value = self._read_field_value(
-                    child, 7, "ACFD_FIELD_VALUE"
-                )
-                if dwgprops_value is None:
-                    dwgprops_value = ""
-                elif not isinstance(dwgprops_value, str):
-                    dwgprops_value = str(dwgprops_value)
-                self.add_deferred_source_code_line(
-                    "_custom_vars = _host.doc.header.custom_vars"
-                )
-                self.add_deferred_source_code_line(
-                    f"if _custom_vars.has_tag({json.dumps(dwgprops_name)}):"
-                )
-                self.add_deferred_source_code_line(
-                    f"    _custom_vars.replace({json.dumps(dwgprops_name)}, {json.dumps(dwgprops_value)})"
-                )
-                self.add_deferred_source_code_line("else:")
-                self.add_deferred_source_code_line(
-                    f"    _custom_vars.append({json.dumps(dwgprops_name)}, {json.dumps(dwgprops_value)})"
-                )
-            self.add_deferred_source_code_line("_child.reset([")
-            self.add_deferred_source_code_lines(field_reset_source)
-            self.add_deferred_source_code_line("])")
 
     def generic_api_call(
         self, dxftype: str, dxfattribs: dict, prefix: str = "e = "
@@ -1062,7 +1141,11 @@ class _SourceCodeGenerator:
         content: list[list[str]] = []
         for row in data.rows():
             content.append([
-                cell.text if cell.is_text_cell else ""
+                (
+                    self._field_display_text(entity.get_cell_primary_field(cell.row, cell.col))
+                    if cell.is_text_cell and cell.field_handle is not None and entity.get_cell_primary_field(cell.row, cell.col) is not None
+                    else cell.text if cell.is_text_cell else ""
+                )
                 for cell in row
             ])
 
@@ -1083,6 +1166,45 @@ class _SourceCodeGenerator:
         self.add_source_code_line(")")
 
         self._emit_acad_table_mutations(entity)
+        self._schedule_acad_table_fields(entity)
+
+    def _schedule_acad_table_fields(self, entity: DXFEntity) -> None:
+        data = getattr(entity, "data", None)
+        handle = entity.dxf.get("handle")
+        if data is None or not handle:
+            return
+        for cell in data.cells:
+            if cell.field_handle is None:
+                continue
+            wrapper = getattr(entity, "get_cell_field", lambda *_: None)(cell.row, cell.col)
+            primary = getattr(entity, "get_cell_primary_field", lambda *_: None)(cell.row, cell.col)
+            if (
+                getattr(wrapper, "dxftype", lambda: "")() != "FIELD"
+                or primary is None
+            ):
+                self.add_deferred_source_code_line(
+                    f"# unsupported ACAD_TABLE field cell at ({cell.row}, {cell.col})"
+                )
+                continue
+            self.add_deferred_source_code_line(
+                f'_host = _entity_map[{json.dumps(handle)}]'
+            )
+            if not self._emit_field_construction(primary, "_field", "_host"):
+                self.add_deferred_source_code_line(
+                    f"# unsupported ACAD_TABLE field cell at ({cell.row}, {cell.col})"
+                )
+                continue
+            self.add_deferred_source_code_line("_host.set_cell_linked_field(")
+            self.add_deferred_source_code_line(f"    {cell.row},")
+            self.add_deferred_source_code_line(f"    {cell.col},")
+            self.add_deferred_source_code_line("    _field,")
+            self.add_deferred_source_code_line(
+                f"    text={json.dumps(self._field_display_text(primary))},"
+            )
+            self.add_deferred_source_code_line(
+                f"    register_field_list={self._uses_field_list(wrapper, primary)},"
+            )
+            self.add_deferred_source_code_line(")")
 
     def _emit_acad_table_mutations(self, entity: DXFEntity) -> None:
         data = getattr(entity, "data", None)
