@@ -1968,6 +1968,48 @@ class AcadTableBlockContent(DXFTagStorage):
         current_field = self.get_cell_primary_field(row, col)
         return current_field if current_field is not None else field, wrapper
 
+    def new_cell_acexpr_field(
+        self,
+        row: int,
+        col: int,
+        expression: str,
+        child_fields: Sequence,
+        *,
+        field_format: str = "%lu2",
+        value=None,
+        display: Optional[str] = None,
+        text: Optional[str] = None,
+        register_field_list: bool = False,
+    ):
+        from .dxfobj import Field
+
+        if self.doc is None:
+            raise const.DXFStructureError("ACAD_TABLE requires a valid DXF document")
+        if display is None and value is not None:
+            if isinstance(value, float) and field_format == "%lu2":
+                display = f"{value:.4f}"
+            else:
+                display = str(value)
+        if text is None and display is not None:
+            text = display
+        expr = Field.build_acexpr(
+            self.doc,
+            expression,
+            child_fields,
+            field_format=field_format,
+            value=value,
+            display=display or "",
+        )
+        wrapper = self.set_cell_linked_field(
+            row,
+            col,
+            expr,
+            text=text or "",
+            register_field_list=register_field_list,
+        )
+        current_field = self.get_cell_primary_field(row, col)
+        return current_field if current_field is not None else expr, wrapper
+
     def set_cell_text_style(
         self, row: int, col: int, style_name: Optional[str]
     ) -> AcadTableCell:

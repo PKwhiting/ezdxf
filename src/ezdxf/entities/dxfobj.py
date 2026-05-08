@@ -1,12 +1,12 @@
 # Copyright (c) 2019-2024 Manfred Moitzi
 # License: MIT License
 from __future__ import annotations
-from typing import TYPE_CHECKING, Iterable, Union, Any, Optional
+from typing import TYPE_CHECKING, Iterable, Union, Any, Optional, Sequence
 from typing_extensions import Self, TypeGuard
 import logging
 import array
 from ezdxf.lldxf import validator
-from ezdxf.lldxf.const import DXF2000, DXFStructureError, SUBCLASS_MARKER
+from ezdxf.lldxf.const import DXF2000, DXFStructureError, DXFTypeError, SUBCLASS_MARKER
 from ezdxf.lldxf.tags import Tags
 from ezdxf.lldxf.types import dxftag, DXFTag, DXFBinaryTag
 from ezdxf.lldxf.attributes import (
@@ -428,6 +428,20 @@ class Field(DXFObject):
                 result.append(field)
         return result
 
+    def get_field_tree(self) -> list[Field]:
+        result: list[Field] = []
+        stack = [self]
+        seen: set[int] = set()
+        while stack:
+            field = stack.pop()
+            marker = id(field)
+            if marker in seen:
+                continue
+            seen.add(marker)
+            result.append(field)
+            stack.extend(reversed(field.get_child_fields()))
+        return result
+
     @staticmethod
     def _field_text_checksum(text: str) -> float:
         return float(sum((index + 1) * ord(char) for index, char in enumerate(text)))
@@ -560,6 +574,100 @@ class Field(DXFObject):
             value=value,
             display=display,
         )
+
+    def set_acexpr(
+        self,
+        expression: str,
+        child_fields: Sequence[Union[Field, str]],
+        *,
+        field_format: str = "%lu2",
+        value: Any = None,
+        display: str = "",
+        include_eval_option: bool = True,
+    ) -> None:
+        handles: list[str] = []
+        for child in child_fields:
+            if isinstance(child, Field):
+                handle = child.dxf.handle
+            else:
+                handle = str(child)
+            if not handle:
+                raise DXFStructureError("AcExpr child FIELD requires a valid handle")
+            handles.append(handle)
+
+        field_code = f"\\AcExpr {expression}"
+        if field_format:
+            field_code += f' \\f "{field_format}"'
+
+        tags: list[tuple[int, Any]] = [
+            (1, "AcExpr"),
+            (2, field_code),
+            (90, len(handles)),
+            *[(360, handle) for handle in handles],
+            (97, 0),
+            (91, 0 if include_eval_option else 63),
+            (92, 0),
+            (94, 59),
+            (95, 2),
+            (96, 0),
+            (300, ""),
+        ]
+        if include_eval_option:
+            tags.extend(
+                [
+                    (93, 1),
+                    (6, "ACAD_ROUNDTRIP_2008_FIELD_EVALOPTION"),
+                    (93, 2),
+                    (90, 1),
+                    (91, 63),
+                    (94, 0),
+                    (300, ""),
+                    (302, ""),
+                    (304, "ACVALUE_END"),
+                ]
+            )
+        else:
+            tags.append((93, 0))
+
+        if value is not None or display:
+            tags.extend(self._field_value_tags(value, display, field_format))
+        self.reset(tags)
+
+    @staticmethod
+    def build_acexpr(
+        doc,
+        expression: str,
+        child_fields: Sequence[Field],
+        *,
+        field_format: str = "%lu2",
+        value: Any = None,
+        display: str = "",
+        include_eval_option: bool = True,
+    ) -> Field:
+        expr_children: list[Field] = []
+        for child in child_fields:
+            if not isinstance(child, Field):
+                raise DXFTypeError(f"invalid DXF type: {child.dxftype()}")
+            if child.doc is not None and child.doc is not doc:
+                raise DXFStructureError("field belongs to a different DXF document")
+            child_copy = doc.objects.add_field(owner="0")
+            child_copy.reset(child.tags)
+            if child_copy.evaluator_id == "AcObjProp":
+                child_copy.normalize_acobjprop_cache()
+            expr_children.append(child_copy)
+
+        expr = doc.objects.add_field(owner="0")
+        expr.set_acexpr(
+            expression,
+            expr_children,
+            field_format=field_format,
+            value=value,
+            display=display,
+            include_eval_option=include_eval_option,
+        )
+        for child_copy in expr_children:
+            child_copy.dxf.owner = expr.dxf.handle
+        return expr
 
     def set_acobjprop(
         self,

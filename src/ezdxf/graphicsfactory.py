@@ -74,6 +74,7 @@ if TYPE_CHECKING:
         MultiLeader,
         Helix,
         AcadTableBlockContent,
+        Field,
     )
     from ezdxf.render.mleader import (
         MultiLeaderMTextBuilder,
@@ -411,6 +412,37 @@ class CreatorInterface:
             target,
             property_name,
             field_format=field_format,
+            text=text,
+            register_field_list=register_field_list,
+        )
+        return text_entity
+
+    def add_text_acexpr_field(
+        self,
+        expression: str,
+        child_fields: Sequence[Field],
+        *,
+        field_format: str = "%lu2",
+        value=None,
+        display: Optional[str] = None,
+        text: Optional[str] = None,
+        height: Optional[float] = None,
+        rotation: Optional[float] = None,
+        dxfattribs=None,
+        register_field_list: bool = False,
+    ) -> Text:
+        text_entity = self.add_text(
+            text or "",
+            height=height,
+            rotation=rotation,
+            dxfattribs=dxfattribs,
+        )
+        text_entity.new_acexpr_field(
+            expression,
+            child_fields,
+            field_format=field_format,
+            value=value,
+            display=display,
             text=text,
             register_field_list=register_field_list,
         )
@@ -961,6 +993,30 @@ class CreatorInterface:
             target,
             property_name,
             field_format=field_format,
+            text=text,
+            register_field_list=register_field_list,
+        )
+        return mtext
+
+    def add_mtext_acexpr_field(
+        self,
+        expression: str,
+        child_fields: Sequence[Field],
+        *,
+        field_format: str = "%lu2",
+        value=None,
+        display: Optional[str] = None,
+        text: Optional[str] = None,
+        dxfattribs=None,
+        register_field_list: bool = False,
+    ) -> MText:
+        mtext = self.add_mtext(text or "", dxfattribs=dxfattribs)
+        mtext.new_acexpr_field(
+            expression,
+            child_fields,
+            field_format=field_format,
+            value=value,
+            display=display,
             text=text,
             register_field_list=register_field_list,
         )

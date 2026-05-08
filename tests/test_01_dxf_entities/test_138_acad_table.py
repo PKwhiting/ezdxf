@@ -18,6 +18,7 @@ from ezdxf.entities.acad_table import (
     read_acad_table_content,
 )
 from ezdxf.entities import factory
+from ezdxf.entities.dxfobj import Field
 from ezdxf.lldxf.tags import Tags
 
 
@@ -1119,6 +1120,47 @@ def test_new_cell_acobjprop_field_sets_shell_handle_and_resolves_field():
     table.export_dxf(collector)
     exported = Tags(collector.tags)
     assert cell.field_handle in [tag.value for tag in exported.find_all(344)]
+
+
+def test_new_cell_acexpr_field_sets_shell_handle_and_resolves_children():
+    doc = ezdxf.new("R2018")
+    line = doc.modelspace().add_line((0, 0), (10, 0))
+    circle = doc.modelspace().add_circle((5, 0), radius=2.5)
+    table = doc.modelspace().add_table((0, 0), [["T"], ["H"], ["25.0000"]])
+    child1 = Field()
+    child1.set_acobjprop(line, "Length", value=10.0, display="10.0000")
+    child2 = Field()
+    child2.set_acobjprop(circle, "Radius", value=2.5, display="2.5000")
+
+    field, wrapper = table.new_cell_acexpr_field(
+        2,
+        0,
+        "(%<\\_FldIdx 0>%*%<\\_FldIdx 1>%)",
+        [child1, child2],
+        value=25.0,
+        text="25.0000",
+        register_field_list=True,
+    )
+
+    cell = table.get_cell(2, 0)
+    assert cell.field_handle == wrapper.dxf.handle
+    assert field.evaluator_id == "AcExpr"
+    assert field.field_code == "\\AcExpr (%<\\_FldIdx 0>%*%<\\_FldIdx 1>%) \\f \"%lu2\""
+    children = field.get_child_fields()
+    assert len(children) == 2
+    assert children[0].evaluator_id == "AcObjProp"
+    assert children[1].evaluator_id == "AcObjProp"
+    mtext = get_geometry_block_cell_mtext(doc, table, 2, 0)
+    assert mtext.text == "25.0000"
+    assert mtext.get_primary_field() is not None
+    assert mtext.get_primary_field().evaluator_id == "AcExpr"
+    linked = table.get_linked_table_content().linked_data
+    assert linked is not None
+    assert linked.get_cell(2, 0).contents[0].content_type == 2
+    field_list = doc.objects.get_field_list()
+    assert field_list is not None
+    for linked_field in wrapper.get_field_tree():
+        assert linked_field.dxf.handle in field_list.handles
 
 
 def test_set_cell_text_clears_linked_field_reference():

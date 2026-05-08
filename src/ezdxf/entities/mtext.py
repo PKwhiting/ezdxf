@@ -8,6 +8,7 @@ from typing import (
     Iterator,
     Optional,
     Callable,
+    Sequence,
     cast,
 )
 from typing_extensions import Self
@@ -783,7 +784,7 @@ class MText(DXFGraphic):
         if register_field_list:
             field_list = self.doc.objects.setup_field_list()
             handles = list(field_list.handles)
-            for handle in (wrapper.dxf.handle, field.dxf.handle):
+            for handle in (linked.dxf.handle for linked in wrapper.get_field_tree()):
                 if handle and handle not in handles:
                     handles.append(handle)
             field_list.handles = handles
@@ -948,6 +949,42 @@ class MText(DXFGraphic):
             display=display or "",
         )
         return field, wrapper
+
+    def new_acexpr_field(
+        self,
+        expression: str,
+        child_fields: Sequence[Field],
+        key: str = "TEXT",
+        *,
+        field_format: str = "%lu2",
+        value: Any = None,
+        display: Optional[str] = None,
+        text: Optional[str] = None,
+        register_field_list: bool = False,
+    ) -> tuple[Field, Field]:
+        from .dxfobj import Field
+
+        if self.doc is None:
+            raise const.DXFStructureError("valid DXF document required")
+        if display is None and value is not None:
+            display = self._format_object_property_value(value, field_format)
+        if text is None and display is not None:
+            text = display
+        expr = Field.build_acexpr(
+            self.doc,
+            expression,
+            child_fields,
+            field_format=field_format,
+            value=value,
+            display=display or "",
+        )
+        wrapper = self.set_linked_field(
+            expr,
+            key=key,
+            text=text,
+            register_field_list=register_field_list,
+        )
+        return expr, wrapper
 
     @staticmethod
     def _infer_object_property_value(target: DXFEntity, property_name: str) -> Any:

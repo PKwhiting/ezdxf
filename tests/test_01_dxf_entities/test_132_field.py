@@ -207,6 +207,25 @@ def test_set_dwgprops_builds_formatted_title_field():
     assert field.field_code == "\\AcVar CustomDP.Title \\f \"%tc1\""
 
 
+def test_set_acexpr_builds_expression_field_with_two_children():
+    child1 = Field.new(handle="A1", owner="0", dxfattribs={})
+    child2 = Field.new(handle="A2", owner="0", dxfattribs={})
+    field = Field()
+    field.set_acexpr(
+        "(%<\\_FldIdx 0>%*%<\\_FldIdx 1>%)",
+        [child1, child2],
+        value=25.0,
+        display="25.0000",
+    )
+    assert field.evaluator_id == "AcExpr"
+    assert field.field_code == "\\AcExpr (%<\\_FldIdx 0>%*%<\\_FldIdx 1>%) \\f \"%lu2\""
+    assert field.dxf.n_child_fields == 2
+    assert field.child_handles == ["A1", "A2"]
+    assert (6, "ACAD_ROUNDTRIP_2008_FIELD_EVALOPTION") in field.tags
+    assert (140, 25.0) in field.tags
+    assert (301, "25.0000") in field.tags
+
+
 def test_clear_tags_clears_simple_attributes():
     entity = Field.from_text(FIELD)
     entity.clear()
