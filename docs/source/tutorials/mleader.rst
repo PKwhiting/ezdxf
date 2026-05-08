@@ -34,6 +34,7 @@ The field helpers are entity-level methods on a built MULTILEADER object, e.g.:
 .. code-block:: python
 
     import ezdxf
+    from ezdxf.entities.dxfobj import Field
     from ezdxf.math import Vec2
 
     doc = ezdxf.new("R2007")
@@ -49,6 +50,25 @@ The field helpers are entity-level methods on a built MULTILEADER object, e.g.:
     builder.build(insert=Vec2(0, 5))
     ml2 = builder.multileader
     ml2.new_dwgprops_field("ProjectCode", text="VALUE-123", register_field_list=True)
+
+    line = msp.add_line((0, 0), (10, 0))
+    circle = msp.add_circle((5, 0), radius=2.5)
+    child1 = Field()
+    child1.set_acobjprop(line, "Length", value=10.0, display="10.0000")
+    child2 = Field()
+    child2.set_acobjprop(circle, "Radius", value=2.5, display="2.5000")
+
+    builder = msp.add_multileader_mtext("Standard")
+    builder.set_content("TEXT")
+    builder.build(insert=Vec2(0, 10))
+    ml3 = builder.multileader
+    ml3.new_acexpr_field(
+        "(%<\\_FldIdx 0>%*%<\\_FldIdx 1>%)",
+        [child1, child2],
+        value=25.0,
+        text="25.0000",
+        register_field_list=True,
+    )
 
 Only MULTILEADER entities with MTEXT content are supported by this experimental
 field-host API.

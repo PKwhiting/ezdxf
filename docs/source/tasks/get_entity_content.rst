@@ -270,12 +270,37 @@ complete content is stored in the first row. All cells contain strings.
         field = acad_table.get_cell_field(0, 0)
         primary_field = acad_table.get_cell_primary_field(0, 0)
 
+    If the primary field is an `AcExpr` expression field, the operand fields can
+    be traversed by::
+
+        if primary_field and primary_field.evaluator_id == "AcExpr":
+            operands = primary_field.get_child_fields()
+
     Table text cells authored by `ezdxf` can also create these field wrappers
     directly by::
 
         line = table.doc.modelspace().add_line((0, 0), (3, 4))
         table.new_cell_acvar_field(0, 0, "Author", text="----")
         table.new_cell_acobjprop_field(1, 0, line, "Length", text="5.0")
+
+    Expression fields can also be authored by supplying child `FIELD` objects
+    explicitly. For example::
+
+        from ezdxf.entities.dxfobj import Field
+
+        circle = table.doc.modelspace().add_circle((5, 0), radius=2.5)
+        child1 = Field()
+        child1.set_acobjprop(line, "Length", value=10.0, display="10.0000")
+        child2 = Field()
+        child2.set_acobjprop(circle, "Radius", value=2.5, display="2.5000")
+        table.new_cell_acexpr_field(
+            2,
+            0,
+            "(%<\\_FldIdx 0>%*%<\\_FldIdx 1>%)",
+            [child1, child2],
+            value=25.0,
+            text="25.0000",
+        )
 
     The associated `TABLESTYLE` object and the default Title/Header/Data row
     style buckets can also be resolved from a loaded table::

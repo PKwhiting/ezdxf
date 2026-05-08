@@ -8,12 +8,54 @@ TODO
 TEXT Entity
 -----------
 
-TODO
+Object-backed fields can also be hosted by `TEXT` entities. For example::
+
+    from ezdxf.entities.dxfobj import Field
+
+    line = msp.add_line((0, 0), (10, 0))
+    circle = msp.add_circle((5, 0), radius=2.5)
+
+    txt = msp.add_text_acobjprop_field(line, "Length", register_field_list=True)
+
+    child1 = Field()
+    child1.set_acobjprop(line, "Length", value=10.0, display="10.0000")
+    child2 = Field()
+    child2.set_acobjprop(circle, "Radius", value=2.5, display="2.5000")
+    expr = msp.add_text_acexpr_field(
+        "(%<\\_FldIdx 0>%*%<\\_FldIdx 1>%)",
+        [child1, child2],
+        value=25.0,
+        text="25.0000",
+        register_field_list=True,
+    )
 
 MTEXT Entity
 ------------
 
-TODO
+`MTEXT` supports the same object-backed field helpers. For example::
+
+    from ezdxf.entities.dxfobj import Field
+
+    line = msp.add_line((0, 0), (10, 0))
+    circle = msp.add_circle((5, 0), radius=2.5)
+
+    msp.add_mtext_acvar_field("Author", text="----", register_field_list=True)
+    msp.add_mtext_acobjprop_field(line, "Length", register_field_list=True)
+
+    child1 = Field()
+    child1.set_acobjprop(line, "Length", value=10.0, display="10.0000")
+    child2 = Field()
+    child2.set_acobjprop(circle, "Radius", value=2.5, display="2.5000")
+    expr = msp.add_mtext_acexpr_field(
+        "(%<\\_FldIdx 0>%*%<\\_FldIdx 1>%)",
+        [child1, child2],
+        value=25.0,
+        text="25.0000",
+        register_field_list=True,
+    )
+
+The `expression` argument is the raw `AcExpr` body and references its child
+fields by zero-based `%<\\_FldIdx n>%` placeholders.
 
 DIMENSION  Entity
 -----------------
@@ -60,6 +102,26 @@ Text cells can also host object-backed field wrappers. For example::
 These helpers are limited to text cells. They create the same wrapper/child
 `FIELD` object structure used by the existing `TEXT` and `MTEXT` field APIs and
 store the wrapper handle in the cell-level `344` shell tag.
+
+Expression fields can also be hosted by table text cells by supplying child
+`FIELD` objects explicitly. For example::
+
+    from ezdxf.entities.dxfobj import Field
+
+    circle = msp.add_circle((5, 0), radius=2.5)
+    child1 = Field()
+    child1.set_acobjprop(line, "Length", value=10.0, display="10.0000")
+    child2 = Field()
+    child2.set_acobjprop(circle, "Radius", value=2.5, display="2.5000")
+    table.new_cell_acexpr_field(
+        2,
+        1,
+        "(%<\\_FldIdx 0>%*%<\\_FldIdx 1>%)",
+        [child1, child2],
+        value=25.0,
+        text="25.0000",
+        register_field_list=True,
+    )
 
 Inline MTEXT-style payload formatting can also be authored directly by helper
 methods. For example::

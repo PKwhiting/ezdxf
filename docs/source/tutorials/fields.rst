@@ -187,21 +187,26 @@ Layout/modelspace level helpers:
 - :meth:`~ezdxf.graphicsfactory.CreatorInterface.add_mtext_acvar_field`
 - :meth:`~ezdxf.graphicsfactory.CreatorInterface.add_mtext_dwgprops_field`
 - :meth:`~ezdxf.graphicsfactory.CreatorInterface.add_mtext_acobjprop_field`
+- :meth:`~ezdxf.graphicsfactory.CreatorInterface.add_mtext_acexpr_field`
 - :meth:`~ezdxf.graphicsfactory.CreatorInterface.add_text_acvar_field`
 - :meth:`~ezdxf.graphicsfactory.CreatorInterface.add_text_dwgprops_field`
 - :meth:`~ezdxf.graphicsfactory.CreatorInterface.add_text_acobjprop_field`
+- :meth:`~ezdxf.graphicsfactory.CreatorInterface.add_text_acexpr_field`
 
 Entity-level helpers:
 
 - :meth:`~ezdxf.entities.MText.new_acvar_field`
 - :meth:`~ezdxf.entities.MText.new_dwgprops_field`
 - :meth:`~ezdxf.entities.MText.new_acobjprop_field`
+- :meth:`~ezdxf.entities.MText.new_acexpr_field`
 - :meth:`~ezdxf.entities.Text.new_acvar_field`
 - :meth:`~ezdxf.entities.Text.new_dwgprops_field`
 - :meth:`~ezdxf.entities.Text.new_acobjprop_field`
+- :meth:`~ezdxf.entities.Text.new_acexpr_field`
 - :meth:`~ezdxf.entities.MultiLeader.new_acvar_field`
 - :meth:`~ezdxf.entities.MultiLeader.new_dwgprops_field`
 - :meth:`~ezdxf.entities.MultiLeader.new_acobjprop_field`
+- :meth:`~ezdxf.entities.MultiLeader.new_acexpr_field`
 
 Builder-level helpers for MTEXT MULTILEADER content:
 

@@ -1,6 +1,7 @@
 # Copyright (c) 2026, Manfred Moitzi
 # License: MIT License
 import ezdxf
+from ezdxf.entities.dxfobj import Field
 from ezdxf.math import Vec2
 
 
@@ -55,6 +56,35 @@ def test_graphicsfactory_add_text_dwgprops_field():
     assert primary is not None
     assert primary.field_code == "\\AcVar CustomDP.ProjectCode"
     assert doc.header.custom_vars.get("ProjectCode") == "VALUE-123"
+
+
+def test_graphicsfactory_add_text_acexpr_field():
+    doc = ezdxf.new("R2007")
+    msp = doc.modelspace()
+    line = msp.add_line((0, 0), (10, 0))
+    circle = msp.add_circle((5, 0), radius=2.5)
+    child1 = Field()
+    child1.set_acobjprop(line, "Length", value=10.0, display="10.0000")
+    child2 = Field()
+    child2.set_acobjprop(circle, "Radius", value=2.5, display="2.5000")
+
+    txt = msp.add_text_acexpr_field(
+        "(%<\\_FldIdx 0>%*%<\\_FldIdx 1>%)",
+        [child1, child2],
+        value=25.0,
+        text="25.0000",
+        register_field_list=True,
+    )
+
+    assert txt.dxf.text == "25.0000"
+    primary = txt.get_primary_field()
+    assert primary is not None
+    assert primary.evaluator_id == "AcExpr"
+    assert primary.field_code == "\\AcExpr (%<\\_FldIdx 0>%*%<\\_FldIdx 1>%) \\f \"%lu2\""
+    children = primary.get_child_fields()
+    assert len(children) == 2
+    assert children[0].evaluator_id == "AcObjProp"
+    assert children[1].evaluator_id == "AcObjProp"
 
 
 def test_multileader_new_acvar_field_creates_object_backed_field():
@@ -113,3 +143,43 @@ def test_multileader_new_dwgprops_field_creates_object_backed_field():
     assert child.evaluator_id == "AcVar"
     assert child.field_code == "\\AcVar CustomDP.ProjectCode"
     assert doc.header.custom_vars.get("ProjectCode") == "VALUE-123"
+
+
+def test_multileader_new_acexpr_field_creates_nested_expression_field():
+    doc = ezdxf.new("R2007")
+    msp = doc.modelspace()
+    line = msp.add_line((0, 0), (10, 0))
+    circle = msp.add_circle((5, 0), radius=2.5)
+    builder = msp.add_multileader_mtext("Standard")
+    builder.set_content("TEXT")
+    builder.build(insert=Vec2(0, 0))
+    ml = builder.multileader
+    child1 = Field()
+    child1.set_acobjprop(line, "Length", value=10.0, display="10.0000")
+    child2 = Field()
+    child2.set_acobjprop(circle, "Radius", value=2.5, display="2.5000")
+
+    expr, wrapper = ml.new_acexpr_field(
+        "(%<\\_FldIdx 0>%*%<\\_FldIdx 1>%)",
+        [child1, child2],
+        value=25.0,
+        text="25.0000",
+        register_field_list=True,
+    )
+
+    assert ml.get_mtext_content() == "25.0000"
+    assert ml.get_field() is wrapper
+    assert ml.get_primary_field() is expr
+    assert expr.evaluator_id == "AcExpr"
+    assert expr.field_code == "\\AcExpr (%<\\_FldIdx 0>%*%<\\_FldIdx 1>%) \\f \"%lu2\""
+    children = expr.get_child_fields()
+    assert len(children) == 2
+    assert children[0].evaluator_id == "AcObjProp"
+    assert children[1].evaluator_id == "AcObjProp"
+    assert (6, "ACAD_ROUNDTRIP_2008_FIELD_EVALOPTION") not in expr.tags
+    assert (6, "ACFD_FIELDTEXT_CHECKSUM") not in wrapper.tags
+    assert (94, 9) in wrapper.tags
+    field_list = doc.objects.get_field_list()
+    assert field_list is not None
+    for field in wrapper.get_field_tree():
+        assert field.dxf.handle in field_list.handles
