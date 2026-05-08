@@ -1699,6 +1699,19 @@ class AcadTableBlockContent(DXFTagStorage):
         wrapper = mtext.set_linked_field(field, text=cell.field_display_text)
         cell.field_handle = wrapper.dxf.handle
 
+    def _destroy_geometry_field_support(self, block) -> None:
+        if self.doc is None:
+            return
+        for mtext in list(block.query("MTEXT")):
+            get_field = getattr(mtext, "get_field", None)
+            if not callable(get_field):
+                continue
+            wrapper = mtext.get_field()
+            if wrapper is None:
+                continue
+            for child in wrapper.get_child_fields():
+                self.doc.objects.delete_entity(child)
+
     def _add_cell_blockref(self, block, cell: AcadTableCell) -> None:
         assert self.data is not None
         if self.doc is None or cell.block_record_handle is None:
@@ -1751,6 +1764,7 @@ class AcadTableBlockContent(DXFTagStorage):
         for cell in self.data.cells:
             if cell.field_handle is not None and cell.field_tags is None:
                 self._capture_cell_field_state(cell)
+        self._destroy_geometry_field_support(block)
         block.delete_all_entities()
         self._build_text_table_geometry(block, style)
         if any(cell.block_attributes or cell.field_handle is not None for cell in self.data.cells):

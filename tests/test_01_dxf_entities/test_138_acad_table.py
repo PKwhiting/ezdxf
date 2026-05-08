@@ -1181,6 +1181,7 @@ def test_authored_table_fields_roundtrip_to_shell_and_geometry_fields():
     doc.write(stream)
     loaded = ezdxf.read(StringIO(stream.getvalue()))
     loaded_table = list(loaded.modelspace().query("ACAD_TABLE"))[0]
+    loaded_field_list = loaded.objects.get_field_list()
 
     expected = {
         (1, 1): field1.field_code,
@@ -1188,6 +1189,8 @@ def test_authored_table_fields_roundtrip_to_shell_and_geometry_fields():
         (3, 1): field3.field_code,
         (4, 1): field4.field_code,
     }
+    assert loaded_field_list is not None
+    assert loaded_field_list.dxf.flags == len(loaded_field_list.handles)
     for (row, col), field_code in expected.items():
         cell = loaded_table.get_cell(row, col)
         assert cell.field_handle is not None
@@ -1201,6 +1204,36 @@ def test_authored_table_fields_roundtrip_to_shell_and_geometry_fields():
         assert mtext.get_field() is not None
         assert mtext.get_primary_field() is not None
         assert mtext.get_primary_field().field_code == field_code
+
+
+def test_authored_table_fields_do_not_leave_stale_field_objects():
+    doc = ezdxf.new("R2018")
+    msp = doc.modelspace()
+    line = msp.add_line((0, 0), (3, 4))
+    circle = msp.add_circle((25, 0), radius=2.5)
+    table = msp.add_table(
+        (0, 40),
+        [
+            ["FIELD", "VALUE"],
+            ["AcVar", "----"],
+            ["AcObjProp", "5.0"],
+            ["AcObjProp 2", "2.5"],
+            ["DWGPROPS", "Demo"],
+        ],
+        col_widths=[28.0, 28.0],
+    )
+    table.new_cell_acvar_field(1, 1, "Author", text="----")
+    table.new_cell_acobjprop_field(2, 1, line, "Length", text="5.0")
+    table.new_cell_acobjprop_field(3, 1, circle, "Radius", text="2.5")
+    table.new_cell_dwgprops_field(4, 1, "Project", text="Demo", value="Demo")
+
+    field_list = doc.objects.get_field_list()
+    fields = [entity for entity in doc.objects if entity.dxftype() == "FIELD"]
+
+    assert field_list is not None
+    assert len(fields) == 16
+    assert sorted(field_list.handles) == sorted(entity.dxf.handle for entity in fields)
+    assert all(doc.entitydb.get(handle) is not None for handle in field_list.handles)
 
 
 def test_modelspace_add_table_creates_text_only_acad_table():

@@ -102,7 +102,8 @@ class FieldList(IDBuffer):
         """Export entity specific data as DXF tags."""
         super(DXFObject, self).export_entity(tagwriter)
         tagwriter.write_tag2(SUBCLASS_MARKER, acdb_id_set.name)
-        self.dxf.export_dxf_attribs(tagwriter, "flags")
+        # AutoCAD rewrites this value to the current number of field handles.
+        tagwriter.write_tag2(90, len(self.handles))
         self.export_handles(tagwriter)
         tagwriter.write_tag2(SUBCLASS_MARKER, acdb_field_list.name)
 
