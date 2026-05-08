@@ -21,6 +21,14 @@ from ezdxf.entities import factory
 from ezdxf.lldxf.tags import Tags
 
 
+def get_geometry_block_cell_mtext(doc, table, row: int, col: int):
+    assert table.data is not None
+    block = doc.blocks.get(table.dxf.geometry)
+    assert block is not None
+    mtexts = list(block.query("MTEXT"))
+    return mtexts[row * table.data.n_cols + col]
+
+
 def make_table(cell1: str, cell2: str, cell3: str, first_cell_extra: str = "", row1: str = "11.0") -> str:
     return f"""0
 ACAD_TABLE
@@ -1048,6 +1056,151 @@ def test_resolves_wrapped_cell_field_to_primary_child():
 
     assert table.get_cell_field(0, 0) is wrapper
     assert table.get_cell_primary_field(0, 0) is child
+
+
+def test_new_cell_acvar_field_sets_shell_handle_and_resolves_field():
+    doc = ezdxf.new("R2018")
+    table = doc.modelspace().add_table((0, 0), [["T"], ["H"], ["D"]])
+
+    field, wrapper = table.new_cell_acvar_field(0, 0, "Author", text="----")
+
+    cell = table.get_cell(0, 0)
+    assert cell.field_handle is not None
+    assert cell.field_handle == wrapper.dxf.handle
+    assert cell.text == ""
+    local_wrapper = table.get_cell_field(0, 0)
+    assert local_wrapper is not None
+    assert local_wrapper.dxf.handle == cell.field_handle
+    assert table.get_cell_primary_field(0, 0) is not None
+    assert table.get_cell_primary_field(0, 0).field_code == field.field_code
+    linked = table.get_linked_table_content().linked_data
+    assert linked is not None
+    assert linked.get_cell(0, 0).contents[0].content_type == 2
+    assert linked.get_cell(0, 0).contents[0].block_record_handle is not None
+    mtext = get_geometry_block_cell_mtext(doc, table, 0, 0)
+    assert mtext.text == "----"
+    assert mtext.get_field() is not None
+    assert mtext.get_primary_field() is not None
+    assert mtext.get_primary_field().field_code == field.field_code
+
+    collector = TagCollector(dxfversion=doc.dxfversion)
+    table.export_dxf(collector)
+    exported = Tags(collector.tags)
+    assert cell.field_handle in [tag.value for tag in exported.find_all(344)]
+
+
+def test_new_cell_acobjprop_field_sets_shell_handle_and_resolves_field():
+    doc = ezdxf.new("R2018")
+    line = doc.modelspace().add_line((0, 0), (3, 4))
+    table = doc.modelspace().add_table((0, 0), [["T"], ["H"], ["D"]])
+
+    field, wrapper = table.new_cell_acobjprop_field(1, 0, line, "Length", text="5.0")
+
+    cell = table.get_cell(1, 0)
+    assert cell.field_handle is not None
+    assert cell.field_handle == wrapper.dxf.handle
+    assert cell.text == ""
+    local_wrapper = table.get_cell_field(1, 0)
+    assert local_wrapper is not None
+    assert local_wrapper.dxf.handle == cell.field_handle
+    assert table.get_cell_primary_field(1, 0) is not None
+    assert table.get_cell_primary_field(1, 0).field_code == field.field_code
+    linked = table.get_linked_table_content().linked_data
+    assert linked is not None
+    assert linked.get_cell(1, 0).contents[0].content_type == 2
+    assert linked.get_cell(1, 0).contents[0].block_record_handle is not None
+    mtext = get_geometry_block_cell_mtext(doc, table, 1, 0)
+    assert mtext.text == "5.0"
+    assert mtext.get_field() is not None
+    assert mtext.get_primary_field() is not None
+    assert mtext.get_primary_field().field_code == field.field_code
+
+    collector = TagCollector(dxfversion=doc.dxfversion)
+    table.export_dxf(collector)
+    exported = Tags(collector.tags)
+    assert cell.field_handle in [tag.value for tag in exported.find_all(344)]
+
+
+def test_set_cell_text_clears_linked_field_reference():
+    doc = ezdxf.new("R2018")
+    table = doc.modelspace().add_table((0, 0), [["T"], ["H"], ["D"]])
+
+    _, wrapper = table.new_cell_acvar_field(0, 0, "Author", text="----")
+
+    assert table.get_cell_field(0, 0) is wrapper
+    assert table.get_cell(0, 0).field_handle is not None
+
+    table.set_cell_text(0, 0, "TITLE")
+
+    assert table.get_cell(0, 0).field_handle is None
+    assert table.get_cell_field(0, 0) is None
+    assert table.get_cell(0, 0).text == "TITLE"
+    mtext = get_geometry_block_cell_mtext(doc, table, 0, 0)
+    assert mtext.get_field() is None
+    assert mtext.text == "TITLE"
+
+
+def test_new_cell_acvar_field_registers_field_list_handles():
+    doc = ezdxf.new("R2018")
+    table = doc.modelspace().add_table((0, 0), [["T"], ["H"], ["D"]])
+
+    _, wrapper = table.new_cell_acvar_field(
+        0, 0, "Author", text="----", register_field_list=True
+    )
+    field_list = doc.objects.get_field_list()
+
+    assert field_list is not None
+    assert wrapper.dxf.handle in field_list.handles
+    primary = table.get_cell_primary_field(0, 0)
+    assert primary is not None
+    assert primary.dxf.handle in field_list.handles
+
+
+def test_authored_table_fields_roundtrip_to_shell_and_geometry_fields():
+    doc = ezdxf.new("R2018")
+    msp = doc.modelspace()
+    line = msp.add_line((0, 0), (3, 4))
+    circle = msp.add_circle((25, 0), radius=2.5)
+    table = msp.add_table(
+        (0, 40),
+        [
+            ["FIELD", "VALUE"],
+            ["AcVar", "----"],
+            ["AcObjProp", "5.0"],
+            ["AcObjProp 2", "2.5"],
+            ["DWGPROPS", "Demo"],
+        ],
+        col_widths=[28.0, 28.0],
+    )
+    field1, _ = table.new_cell_acvar_field(1, 1, "Author", text="----")
+    field2, _ = table.new_cell_acobjprop_field(2, 1, line, "Length", text="5.0")
+    field3, _ = table.new_cell_acobjprop_field(3, 1, circle, "Radius", text="2.5")
+    field4, _ = table.new_cell_dwgprops_field(4, 1, "Project", text="Demo", value="Demo")
+
+    stream = StringIO()
+    doc.write(stream)
+    loaded = ezdxf.read(StringIO(stream.getvalue()))
+    loaded_table = list(loaded.modelspace().query("ACAD_TABLE"))[0]
+
+    expected = {
+        (1, 1): field1.field_code,
+        (2, 1): field2.field_code,
+        (3, 1): field3.field_code,
+        (4, 1): field4.field_code,
+    }
+    for (row, col), field_code in expected.items():
+        cell = loaded_table.get_cell(row, col)
+        assert cell.field_handle is not None
+        wrapper = loaded_table.get_cell_field(row, col)
+        assert wrapper is not None
+        primary = loaded_table.get_cell_primary_field(row, col)
+        assert primary is not None
+        assert primary.field_code == field_code
+        mtext = get_geometry_block_cell_mtext(loaded, loaded_table, row, col)
+        assert mtext.text != ""
+        assert mtext.get_field() is not None
+        assert mtext.get_primary_field() is not None
+        assert mtext.get_primary_field().field_code == field_code
 
 
 def test_modelspace_add_table_creates_text_only_acad_table():

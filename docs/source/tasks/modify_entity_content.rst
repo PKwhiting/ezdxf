@@ -50,6 +50,17 @@ Update text-cell content by::
 
     table.set_cell_text(1, 1, "VALUE-LONG")
 
+Text cells can also host object-backed field wrappers. For example::
+
+    line = msp.add_line((0, 0), (3, 4))
+    table.new_cell_acvar_field(0, 0, "Author", text="----")
+    table.new_cell_dwgprops_field(1, 0, "Project", text="Demo")
+    table.new_cell_acobjprop_field(1, 1, line, "Length", text="5.0")
+
+These helpers are limited to text cells. They create the same wrapper/child
+`FIELD` object structure used by the existing `TEXT` and `MTEXT` field APIs and
+store the wrapper handle in the cell-level `344` shell tag.
+
 Inline MTEXT-style payload formatting can also be authored directly by helper
 methods. For example::
 

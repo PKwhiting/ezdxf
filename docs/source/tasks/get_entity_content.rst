@@ -270,6 +270,13 @@ complete content is stored in the first row. All cells contain strings.
         field = acad_table.get_cell_field(0, 0)
         primary_field = acad_table.get_cell_primary_field(0, 0)
 
+    Table text cells authored by `ezdxf` can also create these field wrappers
+    directly by::
+
+        line = table.doc.modelspace().add_line((0, 0), (3, 4))
+        table.new_cell_acvar_field(0, 0, "Author", text="----")
+        table.new_cell_acobjprop_field(1, 0, line, "Length", text="5.0")
+
     The associated `TABLESTYLE` object and the default Title/Header/Data row
     style buckets can also be resolved from a loaded table::
 
