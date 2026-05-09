@@ -27,6 +27,9 @@
 		- {{issue 1374}}
 	- BUGFIX: decode CIF and MIF encoded strings including lower case characters like `\U+abcd`
 		- {{issue 1380}}
+	- BUGFIX: clipping logic in `UniversalFrontend`
+		- {{pr 1383}}
+		- contrbuted by #origami7
 - ## Version 1.4.3 - 2025-10-19
   id:: 68d646ab-d400-4b0f-8c2b-33a30ba1ecc5
 	- NEW: added deployment of Python 3.14 packages
