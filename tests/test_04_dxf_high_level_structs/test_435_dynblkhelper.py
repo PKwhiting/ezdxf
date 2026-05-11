@@ -1,17 +1,23 @@
 from io import StringIO
 
 import ezdxf
-
 from ezdxf.dynblkhelper import (
+    DynamicBlockPropertiesTable,
+    DynamicBlockPropertyColumn,
+    DynamicBlockPropertyRow,
     DynamicBlockVisibilityParameter,
     DynamicBlockVisibilityState,
     get_dynamic_block_definition,
+    get_dynamic_block_properties_table,
+    get_dynamic_block_property_columns,
+    get_dynamic_block_property_rows,
     get_dynamic_block_reference,
     get_dynamic_block_visibility_entities,
     get_dynamic_block_visibility_parameter,
     get_dynamic_block_visibility_state,
     get_dynamic_block_visibility_state_handles,
     get_dynamic_block_visibility_states,
+    set_dynamic_block_properties_table,
     set_dynamic_block_reference,
     set_dynamic_block_visibility_parameter,
     set_dynamic_block_visibility_state,
@@ -112,6 +118,59 @@ def make_dynamic_insert_with_entities(doc, current_state: str):
     insert = msp.add_blockref(anon.name, (0, 0))
     set_dynamic_block_reference(anon, base)
     set_dynamic_block_visibility_state(insert, base, state=current_state)
+    return insert
+
+
+def make_dynamic_properties_insert(doc):
+    msp = doc.modelspace()
+    base = doc.blocks.new("DYN_PROP_PROBE_BASE")
+    base.add_line((0, 0), (1, 0))
+    base.add_line((0, 1), (1, 1))
+    base.add_circle((1, 1), radius=0.5)
+    attdef1 = base.add_attdef("PARAM_1", insert=(10, 14), text="Block Table1")
+    attdef2 = base.add_attdef("PARAM_2", insert=(10, 10), text="Block Table1")
+    attdef3 = base.add_attdef("PARAM_3", insert=(10, 6), text="Block Table1")
+
+    parameter = DynamicBlockVisibilityParameter(
+        handle="",
+        label="Visibility State",
+        parameter_name="Visibility1Param",
+        location=(0.0, 14.0, 0.0),
+        states=(
+            DynamicBlockVisibilityState("STATE_A", tuple(e.dxf.handle for e in base if e.dxftype() != "ATTDEF")),
+            DynamicBlockVisibilityState("STATE_B", tuple(e.dxf.handle for e in base if e.dxftype() != "ATTDEF")),
+            DynamicBlockVisibilityState("STATE_C", tuple(e.dxf.handle for e in base if e.dxftype() != "ATTDEF")),
+        ),
+    )
+    set_dynamic_block_visibility_parameter(base, parameter, guid="{GUID}", true_name="DYN_PROP_PROBE_BASE")
+    table = DynamicBlockPropertiesTable(
+        handle="",
+        label="Block Table",
+        table_name="Block Table1",
+        description="",
+        location=(32.0, 20.0, 0.0),
+        grip_location=(32.0, 20.0, 0.0),
+        columns=(
+            DynamicBlockPropertyColumn(attdef1.dxf.handle, "ATTDEF", "PARAM_1", "Block Table1"),
+            DynamicBlockPropertyColumn(attdef2.dxf.handle, "ATTDEF", "PARAM_2", "Block Table1"),
+            DynamicBlockPropertyColumn(attdef3.dxf.handle, "ATTDEF", "PARAM_3", "Block Table1"),
+            DynamicBlockPropertyColumn("", "BLOCKVISIBILITYPARAMETER", "VisibilityState", "VisibilityState"),
+        ),
+        rows=(
+            DynamicBlockPropertyRow(0, ("VAL 1", "VAL 1", "VAL 1", "STATE_A")),
+            DynamicBlockPropertyRow(1, ("VAL 2", "VAL 1", "VAL 3", "STATE_B")),
+            DynamicBlockPropertyRow(2, ("VAL 3", "VAL 2", "VAL 1", "STATE_C")),
+        ),
+    )
+    set_dynamic_block_properties_table(base, table)
+
+    anon = doc.blocks.new_anonymous_block(type_char="U")
+    anon.add_line((0, 0), (1, 0))
+    anon.add_line((0, 1), (1, 1))
+    anon.add_circle((1, 1), radius=0.5)
+    set_dynamic_block_reference(anon, base)
+    insert = msp.add_blockref(anon.name, (0, 0))
+    set_dynamic_block_visibility_state(insert, base, state="STATE_A")
     return insert
 
 
@@ -336,3 +395,90 @@ def test_dynamic_block_writer_applies_invisible_mask_to_default_and_active_state
     # Active anonymous reference reflects the requested current state (STATE_C).
     ref_invisible = [entity.dxf.get("invisible", 0) for entity in ref]
     assert ref_invisible == [0, 0, 1, 1, 0, 0]
+
+
+def test_get_dynamic_block_properties_table_reads_columns_rows_and_grip_location():
+    doc = ezdxf.new("R2018")
+    insert = make_dynamic_properties_insert(doc)
+
+    table = get_dynamic_block_properties_table(insert)
+
+    assert isinstance(table, DynamicBlockPropertiesTable)
+    assert table.label == "Block Table"
+    assert table.table_name == "Block Table1"
+    assert table.location == (32.0, 20.0, 0.0)
+    assert table.grip_location == (32.0, 20.0, 0.0)
+    assert table.description == ""
+    assert [column.source_dxftype for column in table.columns] == [
+        "ATTDEF",
+        "ATTDEF",
+        "ATTDEF",
+        "BLOCKVISIBILITYPARAMETER",
+    ]
+    assert [column.name for column in table.columns] == [
+        "PARAM_1",
+        "PARAM_2",
+        "PARAM_3",
+        "VisibilityState",
+    ]
+    assert [row.values for row in table.rows] == [
+        ("VAL 1", "VAL 1", "VAL 1", "STATE_A"),
+        ("VAL 2", "VAL 1", "VAL 3", "STATE_B"),
+        ("VAL 3", "VAL 2", "VAL 1", "STATE_C"),
+    ]
+
+
+def test_dynamic_block_property_column_and_row_helpers():
+    doc = ezdxf.new("R2018")
+    insert = make_dynamic_properties_insert(doc)
+
+    columns = get_dynamic_block_property_columns(insert)
+    rows = get_dynamic_block_property_rows(insert)
+
+    assert len(columns) == 4
+    assert isinstance(columns[0], DynamicBlockPropertyColumn)
+    assert len(rows) == 3
+    assert isinstance(rows[0], DynamicBlockPropertyRow)
+    assert rows[1].index == 1
+
+
+def test_dynamic_block_properties_writer_adds_attdef_support_metadata():
+    doc = ezdxf.new("R2018")
+    insert = make_dynamic_properties_insert(doc)
+    base = doc.blocks.get("DYN_PROP_PROBE_BASE")
+
+    assert insert is not None
+    assert base is not None
+
+    attdefs = [entity for entity in base if entity.dxftype() == "ATTDEF"]
+    assert len(attdefs) == 3
+    for attdef in attdefs:
+        assert attdef.has_extension_dict is True
+        assert "AcadAnnotative" in attdef.xdata.data
+        context_root = attdef.get_extension_dict().dictionary.get("AcDbContextDataManager")
+        assert context_root is not None
+
+
+def test_dynamic_block_properties_writer_clones_attdefs_into_active_reference():
+    doc = ezdxf.new("R2018")
+    insert = make_dynamic_properties_insert(doc)
+    ref = get_dynamic_block_reference(insert)
+
+    assert ref is not None
+    attdefs = [entity for entity in ref if entity.dxftype() == "ATTDEF"]
+    assert [attdef.dxf.tag for attdef in attdefs] == ["PARAM_1", "PARAM_2", "PARAM_3"]
+    assert [attdef.dxf.get("invisible", 0) for attdef in attdefs] == [0, 0, 0]
+
+
+def test_dynamic_block_properties_writer_hides_attdefs_for_nondefault_state():
+    doc = ezdxf.new("R2018")
+    insert = make_dynamic_properties_insert(doc)
+    base = doc.blocks.get("DYN_PROP_PROBE_BASE")
+    ref = get_dynamic_block_reference(insert)
+
+    assert base is not None
+    assert ref is not None
+    set_dynamic_block_visibility_state(insert, base, state="STATE_B")
+
+    attdefs = [entity for entity in ref if entity.dxftype() == "ATTDEF"]
+    assert [attdef.dxf.get("invisible", 0) for attdef in attdefs] == [1, 1, 1]
