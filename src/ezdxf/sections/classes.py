@@ -129,6 +129,22 @@ CLASS_DEFINITIONS = {
     "WIPEOUTVARIABLES": ["AcDbWipeoutVariables", "WipeOut", 0, 0, 0],
     "FIELD": ["AcDbField", "ObjectDBX Classes", 1152, 0, 0],
     "FIELDLIST": ["AcDbFieldList", "ObjectDBX Classes", 1152, 0, 0],
+    "ACAD_EVALUATION_GRAPH": ["AcDbEvalGraph", "ObjectDBX Classes", 1153, 0, 0],
+    "ACAECUSTOBJ": ["AcAeEditorObj", "AcAeEditorObj", 1024, 0, 0],
+    "BLOCKLOOKUPPARAMETER": ["AcDbBlockLookupParameter", "ObjectDBX Classes", 1153, 0, 0],
+    "BLOCKLOOKUPGRIP": ["AcDbBlockLookupGrip", "ObjectDBX Classes", 1153, 0, 0],
+    "BLOCKGRIPLOCATIONCOMPONENT": ["AcDbBlockGripExpr", "ObjectDBX Classes", 1153, 0, 0],
+    "LOOKUPGRIPENTITY": ["AcDbBlockLookupGripEntity", "ObjectDBX Classes", 1025, 0, 1],
+    "ACAEEEMGROBJ": ["AcAeEEMgrObj", "AcAeEEMgrObj", 1024, 0, 0],
+    "LOOKUPPARAMETERENTITY": ["AcDbBlockLookupParameterEntity", "ObjectDBX Classes", 1025, 0, 1],
+    "ACDB_DYNAMICBLOCKPURGEPREVENTER_VERSION": ["AcDbDynamicBlockPurgePreventer", "ObjectDBX Classes", 1153, 0, 0],
+    "BLOCKLOOKUPACTION": ["AcDbBlockLookupAction", "ObjectDBX Classes", 1153, 0, 0],
+    "LOOKUPACTIONENTITY": ["AcDbBlockLookupActionEntity", "ObjectDBX Classes", 1025, 0, 1],
+    "BLOCKVISIBILITYPARAMETER": ["AcDbBlockVisibilityParameter", "ObjectDBX Classes", 1153, 0, 0],
+    "BLOCKVISIBILITYGRIP": ["AcDbBlockVisibilityGrip", "ObjectDBX Classes", 1153, 0, 0],
+    "VISIBILITYGRIPENTITY": ["AcDbBlockVisibilityGripEntity", "ObjectDBX Classes", 1025, 0, 1],
+    "VISIBILITYPARAMETERENTITY": ["AcDbBlockVisibilityParameterEntity", "ObjectDBX Classes", 1025, 0, 1],
+    "ACDB_BLOCKREPRESENTATION_DATA": ["AcDbBlockRepresentationData", "ObjectDBX Classes", 1153, 0, 0],
     "GEODATA": ["AcDbGeoData", "ObjectDBX Classes", 4095, 0, 0],
     "SORTENTSTABLE": ["AcDbSortentsTable", "ObjectDBX Classes", 0, 0, 0],
     "ACAD_TABLE": ["AcDbTable", "ObjectDBX Classes", 1025, 0, 1],
@@ -283,6 +299,34 @@ class ClassesSection:
             self.add_class("FIELD")
         if "FIELDLIST" in dxf_types_in_use:
             self.add_class("FIELDLIST")
+        dynamic_visibility_types = {
+            "ACAD_EVALUATION_GRAPH",
+            "BLOCKVISIBILITYPARAMETER",
+            "BLOCKVISIBILITYGRIP",
+            "BLOCKGRIPLOCATIONCOMPONENT",
+            "ACDB_DYNAMICBLOCKPURGEPREVENTER_VERSION",
+            "ACDB_BLOCKREPRESENTATION_DATA",
+        }
+        if dynamic_visibility_types.intersection(dxf_types_in_use):
+            for name in (
+                "ACAD_EVALUATION_GRAPH",
+                "ACAECUSTOBJ",
+                "BLOCKLOOKUPPARAMETER",
+                "BLOCKLOOKUPGRIP",
+                "BLOCKGRIPLOCATIONCOMPONENT",
+                "LOOKUPGRIPENTITY",
+                "ACAEEEMGROBJ",
+                "LOOKUPPARAMETERENTITY",
+                "ACDB_DYNAMICBLOCKPURGEPREVENTER_VERSION",
+                "BLOCKLOOKUPACTION",
+                "LOOKUPACTIONENTITY",
+                "BLOCKVISIBILITYPARAMETER",
+                "BLOCKVISIBILITYGRIP",
+                "VISIBILITYGRIPENTITY",
+                "VISIBILITYPARAMETERENTITY",
+                "ACDB_BLOCKREPRESENTATION_DATA",
+            ):
+                self.add_class(name)
         if "PDFUNDERLAY" in dxf_types_in_use:
             self.add_class("PDFDEFINITION")
             self.add_class("PDFUNDERLAY")

@@ -112,6 +112,7 @@ class BlockRecord(DXFEntity):
         self.endblk: Optional[EndBlk] = None
         # stores also the block layout structure
         self.block_layout: Optional[BlockLayout] = None
+        self.blkref_handles: list[str] = []
 
     def set_block(self, block: Block, endblk: EndBlk):
         self.block = block
@@ -133,6 +134,21 @@ class BlockRecord(DXFEntity):
         dxf = super().load_dxf_attribs(processor)
         if processor:
             processor.simple_dxfattribs_loader(dxf, acdb_blockrec_group_codes)  # type: ignore
+            try:
+                tags = processor.subclasses[2]
+            except IndexError:
+                return dxf
+            self.blkref_handles = []
+            in_blkrefs = False
+            for code, value in tags:
+                if code == 102 and value == "{BLKREFS":
+                    in_blkrefs = True
+                    continue
+                if in_blkrefs and code == 102 and value == "}":
+                    in_blkrefs = False
+                    continue
+                if in_blkrefs and code == 331:
+                    self.blkref_handles.append(str(value))
         return dxf
 
     def export_entity(self, tagwriter: AbstractTagWriter) -> None:
@@ -141,17 +157,14 @@ class BlockRecord(DXFEntity):
             raise DXFInternalEzdxfError("Exporting BLOCK_RECORDS for DXF R12.")
         tagwriter.write_tag2(SUBCLASS_MARKER, acdb_symbol_table_record.name)
         tagwriter.write_tag2(SUBCLASS_MARKER, acdb_blockrec.name)
-
-        self.dxf.export_dxf_attribs(
-            tagwriter,
-            [
-                "name",
-                "layout",
-                "units",
-                "explode",
-                "scale",
-            ],
-        )
+        write_tag2 = tagwriter.write_tag2
+        self.dxf.export_dxf_attribs(tagwriter, ["name", "layout"])
+        if len(self.blkref_handles):
+            write_tag2(102, "{BLKREFS")
+            for handle in self.blkref_handles:
+                write_tag2(331, handle)
+            write_tag2(102, "}")
+        self.dxf.export_dxf_attribs(tagwriter, ["units", "explode", "scale"])
 
     def export_block_definition(self, tagwriter: AbstractTagWriter) -> None:
         """Exports the BLOCK entity, followed by all content entities and finally the

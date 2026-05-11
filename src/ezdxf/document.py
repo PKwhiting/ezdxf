@@ -657,6 +657,7 @@ class Drawing:
     def update_all(self) -> None:
         if self.dxfversion > DXF12:
             self.classes.add_required_classes(self.dxfversion)
+            self.classes.update_instance_counters()
         self._create_appids()
         self._update_header_vars()
         self.update_extents()

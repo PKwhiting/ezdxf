@@ -119,6 +119,8 @@ def block_to_code(
     code.add_source_code_line("    }")
     code.add_source_code_line(")")
     code.translate_entities(block, ignore=ignore)
+    code._register_block_handle(block)
+    code._emit_dynamic_block_metadata(block)
     return code.code
 
 
@@ -454,6 +456,11 @@ class _SourceCodeGenerator:
                 f'_entity_map[{json.dumps(handle)}] = {var_name}'
             )
 
+    def _register_block_handle(self, block) -> None:
+        if block.block is not None:
+            self._register_entity_handle(block.block, var_name="b.block")
+        self._register_entity_handle(block.block_record, var_name="b.block_record")
+
     @staticmethod
     def _get_host_field_text(entity: DXFEntity) -> str:
         if entity.dxftype() == "MTEXT":
@@ -619,6 +626,115 @@ class _SourceCodeGenerator:
         )
         self._emit_field_custom_var_setup(field, field_var, host_var)
         return True
+
+    @staticmethod
+    def _dynamic_block_guid(block_record) -> str:
+        try:
+            return str(block_record.get_xdata("AcDbDynamicBlockGUID").get_first_value(1000, ""))
+        except const.DXFValueError:
+            return ""
+
+    @staticmethod
+    def _dynamic_block_true_name(block_record) -> str:
+        try:
+            return str(block_record.get_xdata("AcDbDynamicBlockTrueName").get_first_value(1000, ""))
+        except const.DXFValueError:
+            return block_record.dxf.name
+
+    def _emit_dynamic_block_metadata(self, block) -> None:
+        from ezdxf.dynblkhelper import (
+            get_dynamic_block_record_handle,
+            get_dynamic_block_visibility_parameter,
+            is_dynamic_block_definition,
+        )
+
+        block_record = block.block_record
+        if is_dynamic_block_definition(block_record):
+            parameter = get_dynamic_block_visibility_parameter(block)
+            if parameter is None:
+                return
+            self.add_import_statement(
+                "from ezdxf.dynblkhelper import DynamicBlockVisibilityParameter, DynamicBlockVisibilityState, set_dynamic_block_visibility_parameter"
+            )
+            self.add_source_code_line("_dyn_states = (")
+            for state in parameter.states:
+                handles = ", ".join(
+                    f'_entity_map[{json.dumps(handle)}].dxf.handle'
+                    for handle in state.entity_handles
+                )
+                if len(state.entity_handles) == 1:
+                    handles += ","
+                self.add_source_code_line(
+                    f"    DynamicBlockVisibilityState({json.dumps(state.name)}, ({handles})),"
+                )
+            self.add_source_code_line(")")
+            self.add_source_code_line(
+                "_dyn_param = DynamicBlockVisibilityParameter("
+            )
+            self.add_source_code_line("    handle='',")
+            self.add_source_code_line(
+                f"    label={json.dumps(parameter.label)},"
+            )
+            self.add_source_code_line(
+                f"    parameter_name={json.dumps(parameter.parameter_name)},"
+            )
+            self.add_source_code_line(
+                f"    location={self._format_python_value(parameter.location)},"
+            )
+            self.add_source_code_line("    states=_dyn_states,")
+            handles = ", ".join(
+                f'_entity_map[{json.dumps(handle)}].dxf.handle'
+                for handle in parameter.all_entity_handles
+            )
+            if len(parameter.all_entity_handles) == 1:
+                handles += ","
+            self.add_source_code_line(
+                f"    all_entity_handles=({handles}),"
+            )
+            self.add_source_code_line(")")
+            self.add_source_code_line(
+                f"set_dynamic_block_visibility_parameter(b, _dyn_param, guid={json.dumps(self._dynamic_block_guid(block_record))}, true_name={json.dumps(self._dynamic_block_true_name(block_record))})"
+            )
+            return
+
+        base_handle = get_dynamic_block_record_handle(block_record)
+        if not base_handle:
+            return
+        base_block = block.doc.blocks.get(block.doc.entitydb.get(base_handle).dxf.name)
+        if base_block is None:
+            return
+        self.add_import_statement(
+            "from ezdxf.dynblkhelper import set_dynamic_block_reference"
+        )
+        self.add_source_code_line(
+            f"set_dynamic_block_reference(b, {self.doc}.blocks.get({json.dumps(base_block.name)}))"
+        )
+
+    def _schedule_dynamic_block_insert_state(self, entity: Insert) -> None:
+        from ezdxf.dynblkhelper import (
+            get_dynamic_block_definition,
+            get_dynamic_block_visibility_parameter,
+            get_dynamic_block_visibility_state,
+        )
+
+        base_block = get_dynamic_block_definition(entity)
+        if base_block is None:
+            return
+        parameter = get_dynamic_block_visibility_parameter(entity)
+        if parameter is None:
+            return
+        state = get_dynamic_block_visibility_state(entity)
+        if not state:
+            return
+        handle = entity.dxf.get("handle")
+        if not handle:
+            return
+        self.add_import_statement(
+            "from ezdxf.dynblkhelper import set_dynamic_block_visibility_state"
+        )
+        self.add_deferred_source_code_line(
+            f"set_dynamic_block_visibility_state(_entity_map[{json.dumps(handle)}], {self.doc}.blocks.get({json.dumps(base_block.name)}), state={json.dumps(state)}, location={self._format_python_value(parameter.location)})"
+        )
 
     def _format_python_value(self, value: Any) -> str:
         if isinstance(value, str):
@@ -1081,6 +1197,7 @@ class _SourceCodeGenerator:
                 "add_blockref(", ["name", "insert"], entity.dxfattribs()
             )
         )
+        self._schedule_dynamic_block_insert_state(entity)
         if len(entity.attribs):
             for attrib in entity.attribs:
                 dxfattribs = _purge_handles(attrib.dxfattribs())
