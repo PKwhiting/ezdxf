@@ -647,16 +647,20 @@ class _SourceCodeGenerator:
 
     def _emit_dynamic_block_metadata(self, block) -> None:
         from ezdxf.dynblkhelper import (
+            get_dynamic_block_linear_parameters,
             get_dynamic_block_properties_table,
             get_dynamic_block_record_handle,
+            get_dynamic_block_stretch_actions,
             get_dynamic_block_visibility_parameter,
             is_dynamic_block_definition,
         )
 
         block_record = block.block_record
         if is_dynamic_block_definition(block_record):
+            linear_parameters = get_dynamic_block_linear_parameters(block)
             parameter = get_dynamic_block_visibility_parameter(block)
             properties_table = get_dynamic_block_properties_table(block)
+            stretch_actions = get_dynamic_block_stretch_actions(block)
             if parameter is not None:
                 self.add_import_statement(
                     "from ezdxf.dynblkhelper import DynamicBlockVisibilityParameter, DynamicBlockVisibilityState, set_dynamic_block_visibility_parameter"
@@ -740,7 +744,76 @@ class _SourceCodeGenerator:
                 self.add_source_code_line("    columns=_dyn_property_columns,")
                 self.add_source_code_line("    rows=_dyn_property_rows,")
                 self.add_source_code_line(")")
-                self.add_source_code_line("set_dynamic_block_properties_table(b, _dyn_props)")
+                self.add_source_code_line("_dyn_props = set_dynamic_block_properties_table(b, _dyn_props)")
+            if properties_table is not None and linear_parameters:
+                self.add_import_statement(
+                    "from ezdxf.dynblkhelper import DynamicBlockLinearParameter, DynamicBlockStretchAction, set_dynamic_block_linear_parameter"
+                )
+                for index, linear in enumerate(linear_parameters):
+                    if index >= len(stretch_actions):
+                        break
+                    action = stretch_actions[index]
+                    linear_var = f"_dyn_linear_{index}"
+                    action_var = f"_dyn_stretch_{index}"
+                    self.add_source_code_line(f"{linear_var} = DynamicBlockLinearParameter(")
+                    self.add_source_code_line("    handle='',")
+                    self.add_source_code_line(
+                        f"    label={json.dumps(linear.label)},"
+                    )
+                    self.add_source_code_line(
+                        f"    parameter_name={json.dumps(linear.parameter_name)},"
+                    )
+                    self.add_source_code_line(
+                        f"    description={json.dumps(linear.description)},"
+                    )
+                    self.add_source_code_line(
+                        f"    base_point={self._format_python_value(linear.base_point)},"
+                    )
+                    self.add_source_code_line(
+                        f"    end_point={self._format_python_value(linear.end_point)},"
+                    )
+                    self.add_source_code_line(
+                        f"    distance={self._format_python_value(linear.distance)},"
+                    )
+                    self.add_source_code_line(
+                        f"    expr_id={self._format_python_value(linear.expr_id)},"
+                    )
+                    self.add_source_code_line(
+                        f"    base_grip_label={json.dumps(linear.base_grip_label)},"
+                    )
+                    self.add_source_code_line(
+                        f"    end_grip_label={json.dumps(linear.end_grip_label)},"
+                    )
+                    self.add_source_code_line(")")
+                    self.add_source_code_line(f"{action_var} = DynamicBlockStretchAction(")
+                    self.add_source_code_line("    handle='',")
+                    self.add_source_code_line(
+                        f"    label={json.dumps(action.label)},"
+                    )
+                    self.add_source_code_line(
+                        f"    action_location={self._format_python_value(action.action_location)},"
+                    )
+                    self.add_source_code_line(
+                        f"    x_expr_id={self._format_python_value(action.x_expr_id)},"
+                    )
+                    self.add_source_code_line(
+                        f"    x_name={json.dumps(action.x_name)},"
+                    )
+                    self.add_source_code_line(
+                        f"    y_expr_id={self._format_python_value(action.y_expr_id)},"
+                    )
+                    self.add_source_code_line(
+                        f"    y_name={json.dumps(action.y_name)},"
+                    )
+                    self.add_source_code_line(
+                        f"    selection_window={self._format_python_value(action.selection_window)},"
+                    )
+                    self.add_source_code_line("    dependency_handles=(),")
+                    self.add_source_code_line("    targets=(),")
+                    self.add_source_code_line(")")
+                    self.add_source_code_line(
+                        f"set_dynamic_block_linear_parameter(b, {linear_var}, {action_var})"
+                    )
             return
 
         base_handle = get_dynamic_block_record_handle(block_record)

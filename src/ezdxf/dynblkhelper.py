@@ -22,6 +22,10 @@ if TYPE_CHECKING:
 __all__ = [
     "DynamicBlockVisibilityState",
     "DynamicBlockVisibilityParameter",
+    "DynamicBlockLinearGrip",
+    "DynamicBlockLinearParameter",
+    "DynamicBlockStretchActionTarget",
+    "DynamicBlockStretchAction",
     "DynamicBlockPropertyColumn",
     "DynamicBlockPropertyRow",
     "DynamicBlockPropertiesTable",
@@ -38,12 +42,16 @@ __all__ = [
     "get_dynamic_block_visibility_state",
     "get_dynamic_block_visibility_state_handles",
     "get_dynamic_block_visibility_entities",
+    "get_dynamic_block_linear_grips",
+    "get_dynamic_block_linear_parameters",
+    "get_dynamic_block_stretch_actions",
     "get_dynamic_block_properties_table",
     "get_dynamic_block_property_columns",
     "get_dynamic_block_property_rows",
     "get_dynamic_block_property_assoc_networks",
     "get_dynamic_block_property_representations",
     "get_dynamic_block_property_representation_families",
+    "set_dynamic_block_linear_parameter",
     "set_dynamic_block_properties_editor_support",
     "set_dynamic_block_properties_table",
     "set_dynamic_block_visibility_parameter",
@@ -244,6 +252,13 @@ def _apply_property_attdef_visibility(
     property_tags = {attdef.dxf.tag for attdef in _get_property_attdefs(dynamic_block)}
     if not property_tags:
         return
+    if get_dynamic_block_linear_parameters(dynamic_block):
+        for entity in block:
+            if entity.dxftype() != "ATTDEF":
+                continue
+            if entity.dxf.tag in property_tags:
+                entity.dxf.discard("invisible")
+        return
     visible = state == first_state_name
     for entity in block:
         if entity.dxftype() != "ATTDEF":
@@ -270,6 +285,54 @@ class DynamicBlockVisibilityParameter:
     location: tuple[float, float, float]
     states: tuple[DynamicBlockVisibilityState, ...]
     all_entity_handles: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class DynamicBlockLinearGrip:
+    handle: str
+    label: str
+    location: tuple[float, float, float]
+    offset: tuple[float, float, float]
+    expr_id: int
+    x_expr_id: int
+    y_expr_id: int
+
+
+@dataclass(frozen=True)
+class DynamicBlockLinearParameter:
+    handle: str
+    label: str
+    parameter_name: str
+    description: str
+    base_point: tuple[float, float, float]
+    end_point: tuple[float, float, float]
+    distance: float
+    expr_id: int
+    base_grip_handle: str = ""
+    end_grip_handle: str = ""
+    base_grip_label: str = ""
+    end_grip_label: str = ""
+
+
+@dataclass(frozen=True)
+class DynamicBlockStretchActionTarget:
+    entity_handle: str
+    mode: int
+    components: tuple[int, ...] = ()
+
+
+@dataclass(frozen=True)
+class DynamicBlockStretchAction:
+    handle: str
+    label: str
+    action_location: tuple[float, float, float]
+    x_expr_id: int
+    x_name: str
+    y_expr_id: int
+    y_name: str
+    selection_window: tuple[tuple[float, float, float], ...]
+    dependency_handles: tuple[str, ...]
+    targets: tuple[DynamicBlockStretchActionTarget, ...]
 
 
 @dataclass(frozen=True)
@@ -471,6 +534,136 @@ def _parse_visibility_parameter(entity: DXFTagStorage) -> Optional[DynamicBlockV
         location=(float(location[0]), float(location[1]), float(location[2])),
         states=tuple(states),
         all_entity_handles=all_entity_handles,
+    )
+
+
+def _point3d(value: Any) -> tuple[float, float, float]:
+    if len(value) == 2:
+        return (float(value[0]), float(value[1]), 0.0)
+    return (float(value[0]), float(value[1]), float(value[2]))
+
+
+def _eval_expr_id(entity: DXFTagStorage) -> int:
+    try:
+        return int(entity.xtags.get_subclass("AcDbEvalExpr").get_first_value(90, -1))
+    except const.DXFKeyError:
+        return -1
+
+
+def _parse_linear_grip(entity: DXFTagStorage) -> Optional[DynamicBlockLinearGrip]:
+    if entity.dxftype() != "BLOCKLINEARGRIP":
+        return None
+    try:
+        element_tags = entity.xtags.get_subclass("AcDbBlockElement")
+        grip_tags = entity.xtags.get_subclass("AcDbBlockGrip")
+        linear_tags = entity.xtags.get_subclass("AcDbBlockLinearGrip")
+    except const.DXFKeyError:
+        return None
+    location = grip_tags.get_first_value(1010, None)
+    if location is None:
+        return None
+    return DynamicBlockLinearGrip(
+        handle=entity.dxf.handle or "",
+        label=str(element_tags.get_first_value(300, "")),
+        location=_point3d(location),
+        offset=(
+            float(linear_tags.get_first_value(140, 0.0)),
+            float(linear_tags.get_first_value(141, 0.0)),
+            float(linear_tags.get_first_value(142, 0.0)),
+        ),
+        expr_id=_eval_expr_id(entity),
+        x_expr_id=int(grip_tags.get_first_value(91, -1)),
+        y_expr_id=int(grip_tags.get_first_value(92, -1)),
+    )
+
+
+def _parse_linear_parameter(
+    entity: DXFTagStorage,
+    grips_by_expr: dict[int, DynamicBlockLinearGrip],
+) -> Optional[DynamicBlockLinearParameter]:
+    if entity.dxftype() != "BLOCKLINEARPARAMETER":
+        return None
+    try:
+        element_tags = entity.xtags.get_subclass("AcDbBlockElement")
+        point_tags = entity.xtags.get_subclass("AcDbBlock2PtParameter")
+        linear_tags = entity.xtags.get_subclass("AcDbBlockLinearParameter")
+    except const.DXFKeyError:
+        return None
+    base_point = point_tags.get_first_value(1010, None)
+    end_point = point_tags.get_first_value(1011, None)
+    if base_point is None or end_point is None:
+        return None
+    grip_expr_ids = [int(tag.value) for tag in point_tags if tag.code == 91]
+    base_grip = grips_by_expr.get(grip_expr_ids[0], None) if len(grip_expr_ids) > 0 else None
+    end_grip = grips_by_expr.get(grip_expr_ids[1], None) if len(grip_expr_ids) > 1 else None
+    return DynamicBlockLinearParameter(
+        handle=entity.dxf.handle or "",
+        label=str(element_tags.get_first_value(300, "")),
+        parameter_name=str(linear_tags.get_first_value(305, "")),
+        description=str(linear_tags.get_first_value(306, "")),
+        base_point=_point3d(base_point),
+        end_point=_point3d(end_point),
+        distance=float(linear_tags.get_first_value(140, 0.0)),
+        expr_id=_eval_expr_id(entity),
+        base_grip_handle=base_grip.handle if base_grip is not None else "",
+        end_grip_handle=end_grip.handle if end_grip is not None else "",
+        base_grip_label=base_grip.label if base_grip is not None else "",
+        end_grip_label=end_grip.label if end_grip is not None else "",
+    )
+
+
+def _parse_stretch_action(entity: DXFTagStorage) -> Optional[DynamicBlockStretchAction]:
+    if entity.dxftype() != "BLOCKSTRETCHACTION":
+        return None
+    try:
+        element_tags = entity.xtags.get_subclass("AcDbBlockElement")
+        action_tags = entity.xtags.get_subclass("AcDbBlockAction")
+        stretch_tags = list(entity.xtags.get_subclass("AcDbBlockStretchAction"))
+    except const.DXFKeyError:
+        return None
+    action_location = action_tags.get_first_value(1010, None)
+    if action_location is None:
+        return None
+    selection_window = tuple(_point3d(tag.value) for tag in stretch_tags if tag.code == 1011)
+    dependency_handles = tuple(str(tag.value) for tag in action_tags if tag.code == 330)
+    x_expr_id = int(next((tag.value for tag in stretch_tags if tag.code == 92), -1))
+    y_expr_id = int(next((tag.value for tag in stretch_tags if tag.code == 93), -1))
+    x_name = str(next((tag.value for tag in stretch_tags if tag.code == 301), ""))
+    y_name = str(next((tag.value for tag in stretch_tags if tag.code == 302), ""))
+    targets: list[DynamicBlockStretchActionTarget] = []
+    index = 0
+    while index < len(stretch_tags):
+        if stretch_tags[index].code != 331:
+            index += 1
+            continue
+        entity_handle = str(stretch_tags[index].value)
+        index += 1
+        mode = 0
+        if index < len(stretch_tags) and stretch_tags[index].code == 74:
+            mode = int(stretch_tags[index].value)
+            index += 1
+        components: list[int] = []
+        while index < len(stretch_tags) and stretch_tags[index].code == 94:
+            components.append(int(stretch_tags[index].value))
+            index += 1
+        targets.append(
+            DynamicBlockStretchActionTarget(
+                entity_handle=entity_handle,
+                mode=mode,
+                components=tuple(components),
+            )
+        )
+    return DynamicBlockStretchAction(
+        handle=entity.dxf.handle or "",
+        label=str(element_tags.get_first_value(300, "")),
+        action_location=_point3d(action_location),
+        x_expr_id=x_expr_id,
+        x_name=x_name,
+        y_expr_id=y_expr_id,
+        y_name=y_name,
+        selection_window=selection_window,
+        dependency_handles=dependency_handles,
+        targets=tuple(targets),
     )
 
 
@@ -751,16 +944,56 @@ def get_dynamic_block_visibility_entities(
     return tuple(result)
 
 
+def _get_dynamic_graph_owned_objects(
+    source: Union[Insert, BlockLayout, BlockRecord], doc: Optional[Drawing] = None
+) -> tuple[DXFTagStorage, ...]:
+    block_record = _resolve_dynamic_block_record(source, doc)
+    if block_record is None:
+        return ()
+    graph = _get_enhanced_block_graph(block_record)
+    if graph is None:
+        return ()
+    return tuple(_iter_graph_owned_objects(graph))
+
+
+def get_dynamic_block_linear_grips(
+    source: Union[Insert, BlockLayout, BlockRecord], doc: Optional[Drawing] = None
+) -> tuple[DynamicBlockLinearGrip, ...]:
+    result: list[DynamicBlockLinearGrip] = []
+    for entity in _get_dynamic_graph_owned_objects(source, doc):
+        grip = _parse_linear_grip(entity)
+        if grip is not None:
+            result.append(grip)
+    return tuple(result)
+
+
+def get_dynamic_block_linear_parameters(
+    source: Union[Insert, BlockLayout, BlockRecord], doc: Optional[Drawing] = None
+) -> tuple[DynamicBlockLinearParameter, ...]:
+    grips_by_expr = {grip.expr_id: grip for grip in get_dynamic_block_linear_grips(source, doc)}
+    result: list[DynamicBlockLinearParameter] = []
+    for entity in _get_dynamic_graph_owned_objects(source, doc):
+        parameter = _parse_linear_parameter(entity, grips_by_expr)
+        if parameter is not None:
+            result.append(parameter)
+    return tuple(result)
+
+
+def get_dynamic_block_stretch_actions(
+    source: Union[Insert, BlockLayout, BlockRecord], doc: Optional[Drawing] = None
+) -> tuple[DynamicBlockStretchAction, ...]:
+    result: list[DynamicBlockStretchAction] = []
+    for entity in _get_dynamic_graph_owned_objects(source, doc):
+        action = _parse_stretch_action(entity)
+        if action is not None:
+            result.append(action)
+    return tuple(result)
+
+
 def get_dynamic_block_properties_table(
     source: Union[Insert, BlockLayout, BlockRecord], doc: Optional[Drawing] = None
 ) -> Optional[DynamicBlockPropertiesTable]:
-    block_record = _resolve_dynamic_block_record(source, doc)
-    if block_record is None:
-        return None
-    graph = _get_enhanced_block_graph(block_record)
-    if graph is None:
-        return None
-    for entity in _iter_graph_owned_objects(graph):
+    for entity in _get_dynamic_graph_owned_objects(source, doc):
         table = _parse_block_properties_table(entity)
         if table is not None:
             return table
@@ -1297,13 +1530,17 @@ def _build_property_visibility_parameter_subclass(
     visibility: DynamicBlockVisibilityParameter,
     properties_table_handle: str,
     properties_grip_handle: str,
+    *,
+    extra_state_refs: Sequence[Sequence[str]] = (),
+    all_handles: Optional[Sequence[str]] = None,
 ) -> list[tuple[int, Any]]:
-    all_handles = visibility.all_entity_handles or tuple(
-        handle
-        for state in visibility.states
-        for handle in state.entity_handles
-        if handle
-    )
+    if all_handles is None:
+        all_handles = visibility.all_entity_handles or tuple(
+            handle
+            for state in visibility.states
+            for handle in state.entity_handles
+            if handle
+        )
     tags: list[tuple[int, Any]] = [
         (100, "AcDbBlockVisibilityParameter"),
         (281, 1),
@@ -1322,11 +1559,313 @@ def _build_property_visibility_parameter_subclass(
                 *[(332, handle) for handle in state.entity_handles],
             ]
         )
-        if index == 0:
-            tags.extend([(95, 2), (333, properties_grip_handle), (333, properties_table_handle)])
-        else:
-            tags.extend([(95, 1), (333, properties_grip_handle)])
+        refs = [properties_grip_handle]
+        if index == 0 and properties_table_handle:
+            refs.append(properties_table_handle)
+        if index < len(extra_state_refs):
+            refs.extend(extra_state_refs[index])
+        refs = [handle for handle in refs if handle and handle != "0"]
+        tags.extend([(95, len(refs)), *[(333, handle) for handle in refs]])
     return tags
+
+
+def _unique_handles(handles: Sequence[str]) -> tuple[str, ...]:
+    result: list[str] = []
+    seen: set[str] = set()
+    for handle in handles:
+        value = str(handle)
+        if not value or value in seen:
+            continue
+        seen.add(value)
+        result.append(value)
+    return tuple(result)
+
+
+def _augment_visibility_with_property_attdefs(
+    visibility: DynamicBlockVisibilityParameter,
+    attdefs: Sequence[Any],
+) -> DynamicBlockVisibilityParameter:
+    property_handles = tuple(attdef.dxf.handle for attdef in attdefs if attdef.dxf.handle)
+    if not property_handles:
+        return visibility
+    states = tuple(
+        DynamicBlockVisibilityState(
+            state.name,
+            _unique_handles([*state.entity_handles, *property_handles]),
+        )
+        for state in visibility.states
+    )
+    all_handles = _unique_handles([*(visibility.all_entity_handles or ()), *property_handles])
+    if not all_handles:
+        all_handles = _unique_handles(
+            [handle for state in states for handle in state.entity_handles]
+        )
+    return DynamicBlockVisibilityParameter(
+        handle=visibility.handle,
+        label=visibility.label,
+        parameter_name=visibility.parameter_name,
+        location=visibility.location,
+        states=states,
+        all_entity_handles=all_handles,
+    )
+
+
+def _replace_subclass_tags(subclass, tags: Sequence[tuple[int, Any]]) -> None:
+    from ezdxf.lldxf.types import dxftag
+
+    subclass.clear()
+    subclass.extend(dxftag(code, value) for code, value in tags)
+
+
+def _patch_eval_graph_handles(graph: DXFTagStorage, handles: Sequence[str]) -> None:
+    eval_graph = graph.xtags.get_subclass("AcDbEvalGraph")
+    from ezdxf.lldxf.types import dxftag
+
+    handle_index = 0
+    for index, tag in enumerate(eval_graph):
+        if tag.code == 360 and handle_index < len(handles):
+            eval_graph[index] = dxftag(360, handles[handle_index])
+            handle_index += 1
+
+
+def _build_linear_eval_graph_subclass() -> list[tuple[int, Any]]:
+    return [
+        (100, "AcDbEvalGraph"),
+        (96, 52),
+        (97, 52),
+        (91, 0),
+        (93, 32),
+        (95, 6),
+        (360, "0"),
+        (92, 3),
+        (92, 3),
+        (92, 4),
+        (92, 4),
+        (91, 1),
+        (93, 32),
+        (95, 16),
+        (360, "0"),
+        (92, -1),
+        (92, -1),
+        (92, -1),
+        (92, -1),
+        (91, 2),
+        (93, 32),
+        (95, 32),
+        (360, "0"),
+        (92, 0),
+        (92, 4),
+        (92, 1),
+        (92, 3),
+        (91, 3),
+        (93, 32),
+        (95, 33),
+        (360, "0"),
+        (92, -1),
+        (92, -1),
+        (92, 0),
+        (92, 0),
+        (91, 4),
+        (93, 32),
+        (95, 34),
+        (360, "0"),
+        (92, 1),
+        (92, 1),
+        (92, -1),
+        (92, -1),
+        (91, 5),
+        (93, 32),
+        (95, 35),
+        (360, "0"),
+        (92, 2),
+        (92, 2),
+        (92, -1),
+        (92, -1),
+        (91, 6),
+        (93, 32),
+        (95, 45),
+        (360, "0"),
+        (92, 7),
+        (92, 10),
+        (92, 5),
+        (92, 11),
+        (91, 7),
+        (93, 32),
+        (95, 46),
+        (360, "0"),
+        (92, -1),
+        (92, -1),
+        (92, 7),
+        (92, 7),
+        (91, 8),
+        (93, 32),
+        (95, 47),
+        (360, "0"),
+        (92, 5),
+        (92, 5),
+        (92, -1),
+        (92, -1),
+        (91, 9),
+        (93, 32),
+        (95, 48),
+        (360, "0"),
+        (92, 6),
+        (92, 6),
+        (92, -1),
+        (92, -1),
+        (91, 10),
+        (93, 32),
+        (95, 49),
+        (360, "0"),
+        (92, -1),
+        (92, -1),
+        (92, 10),
+        (92, 10),
+        (91, 11),
+        (93, 32),
+        (95, 50),
+        (360, "0"),
+        (92, 8),
+        (92, 8),
+        (92, -1),
+        (92, -1),
+        (91, 12),
+        (93, 32),
+        (95, 51),
+        (360, "0"),
+        (92, 9),
+        (92, 9),
+        (92, -1),
+        (92, -1),
+        (91, 13),
+        (93, 32),
+        (95, 52),
+        (360, "0"),
+        (92, 11),
+        (92, 11),
+        (92, -1),
+        (92, -1),
+        (92, 0),
+        (93, 0),
+        (94, 1),
+        (91, 3),
+        (91, 2),
+        (92, -1),
+        (92, 4),
+        (92, -1),
+        (92, -1),
+        (92, -1),
+        (92, 1),
+        (93, 0),
+        (94, 1),
+        (91, 2),
+        (91, 4),
+        (92, -1),
+        (92, -1),
+        (92, -1),
+        (92, 2),
+        (92, -1),
+        (92, 2),
+        (93, 0),
+        (94, 1),
+        (91, 2),
+        (91, 5),
+        (92, -1),
+        (92, -1),
+        (92, 1),
+        (92, 3),
+        (92, -1),
+        (92, 3),
+        (93, 4),
+        (94, 1),
+        (91, 2),
+        (91, 0),
+        (92, -1),
+        (92, -1),
+        (92, 2),
+        (92, -1),
+        (92, 4),
+        (92, 4),
+        (93, 4),
+        (94, 1),
+        (91, 0),
+        (91, 2),
+        (92, 0),
+        (92, -1),
+        (92, -1),
+        (92, -1),
+        (92, 3),
+        (92, 5),
+        (93, 0),
+        (94, 1),
+        (91, 6),
+        (91, 8),
+        (92, -1),
+        (92, -1),
+        (92, -1),
+        (92, 6),
+        (92, -1),
+        (92, 6),
+        (93, 0),
+        (94, 1),
+        (91, 6),
+        (91, 9),
+        (92, -1),
+        (92, -1),
+        (92, 5),
+        (92, 8),
+        (92, -1),
+        (92, 7),
+        (93, 0),
+        (94, 2),
+        (91, 7),
+        (91, 6),
+        (92, -1),
+        (92, 10),
+        (92, -1),
+        (92, -1),
+        (92, -1),
+        (92, 8),
+        (93, 0),
+        (94, 1),
+        (91, 6),
+        (91, 11),
+        (92, -1),
+        (92, -1),
+        (92, 6),
+        (92, 9),
+        (92, -1),
+        (92, 9),
+        (93, 0),
+        (94, 1),
+        (91, 6),
+        (91, 12),
+        (92, -1),
+        (92, -1),
+        (92, 8),
+        (92, 11),
+        (92, -1),
+        (92, 10),
+        (93, 0),
+        (94, 2),
+        (91, 10),
+        (91, 6),
+        (92, 7),
+        (92, -1),
+        (92, -1),
+        (92, -1),
+        (92, -1),
+        (92, 11),
+        (93, 0),
+        (94, 2),
+        (91, 6),
+        (91, 13),
+        (92, -1),
+        (92, -1),
+        (92, 9),
+        (92, -1),
+        (92, -1),
+    ]
 
 
 def set_dynamic_block_properties_table(
@@ -1567,13 +2106,9 @@ def set_dynamic_block_properties_table(
         table_entity.dxf.handle,
         grip.dxf.handle,
     )
-    vis_subclass.clear()
-    from ezdxf.lldxf.types import dxftag
-
-    vis_subclass.extend(dxftag(code, value) for code, value in patched_tags)
+    _replace_subclass_tags(vis_subclass, patched_tags)
     visibility_entity.set_reactors([table_entity.dxf.handle])
 
-    eval_graph = graph.xtags.get_subclass("AcDbEvalGraph")
     handles = [
         visibility_entity.dxf.handle,
         proxy.dxf.handle,
@@ -1582,13 +2117,7 @@ def set_dynamic_block_properties_table(
         x_comp.dxf.handle,
         y_comp.dxf.handle,
     ]
-    handle_index = 0
-    for index, tag in enumerate(eval_graph):
-        if tag.code == 360 and handle_index < len(handles):
-            from ezdxf.lldxf.types import dxftag
-
-            eval_graph[index] = dxftag(360, handles[handle_index])
-            handle_index += 1
+    _patch_eval_graph_handles(graph, handles)
 
     return DynamicBlockPropertiesTable(
         handle=table_entity.dxf.handle or "",
@@ -1607,6 +2136,276 @@ def set_dynamic_block_properties_table(
             ),
         ]),
         rows=table.rows,
+    )
+
+
+def set_dynamic_block_linear_parameter(
+    block: BlockLayout,
+    parameter: DynamicBlockLinearParameter,
+    stretch_action: DynamicBlockStretchAction,
+) -> DynamicBlockLinearParameter:
+    doc = block.doc
+    if doc is None:
+        raise const.DXFStructureError("valid DXF document required")
+    visibility = get_dynamic_block_visibility_parameter(block)
+    properties = get_dynamic_block_properties_table(block)
+    if visibility is None or properties is None:
+        raise const.DXFValueError("dynamic block requires visibility and properties table")
+    graph = _get_enhanced_block_graph(block.block_record)
+    if graph is None:
+        raise const.DXFStructureError("dynamic block graph not found")
+
+    owned = tuple(_iter_graph_owned_objects(graph))
+    visibility_entity = next((entity for entity in owned if entity.dxftype() == "BLOCKVISIBILITYPARAMETER"), None)
+    table_entity = next((entity for entity in owned if entity.dxftype() == "BLOCKPROPERTIESTABLE"), None)
+    proxy = next((entity for entity in owned if entity.dxftype() == "ACDB_DYNAMICBLOCKPROXYNODE"), None)
+    table_grip = next((entity for entity in owned if entity.dxftype() == "BLOCKPROPERTIESTABLEGRIP"), None)
+    property_components = [entity for entity in owned if entity.dxftype() == "BLOCKGRIPLOCATIONCOMPONENT"]
+    if not isinstance(visibility_entity, DXFTagStorage):
+        raise const.DXFStructureError("visibility parameter object not found")
+    if not isinstance(table_entity, DXFTagStorage):
+        raise const.DXFStructureError("properties table object not found")
+    if not isinstance(proxy, DXFTagStorage):
+        raise const.DXFStructureError("dynamic block proxy node not found")
+    if not isinstance(table_grip, DXFTagStorage):
+        raise const.DXFStructureError("properties table grip not found")
+    if len(property_components) != 2:
+        raise const.DXFStructureError("properties table grip components not found")
+
+    x_comp = next((entity for entity in property_components if entity.xtags.get_subclass("AcDbBlockGripExpr").get_first_value(300, "") == "UpdatedX"), None)
+    y_comp = next((entity for entity in property_components if entity.xtags.get_subclass("AcDbBlockGripExpr").get_first_value(300, "") == "UpdatedY"), None)
+    if not isinstance(x_comp, DXFTagStorage) or not isinstance(y_comp, DXFTagStorage):
+        raise const.DXFStructureError("properties table grip components not found")
+
+    source_attdefs = _get_property_attdefs(block)
+    linear_visibility = _augment_visibility_with_property_attdefs(visibility, source_attdefs)
+    primary_entity_handle = next(
+        (entity.dxf.handle for entity in block if entity.dxftype() != "ATTDEF" and entity.dxf.handle),
+        "",
+    )
+    dependency_handles = stretch_action.dependency_handles or tuple(
+        handle
+        for handle in (
+            table_grip.dxf.handle,
+            table_entity.dxf.handle,
+            *[attdef.dxf.handle for attdef in reversed(source_attdefs)],
+            primary_entity_handle,
+        )
+        if handle
+    )
+    targets = stretch_action.targets or tuple(
+        [
+            *(
+                [DynamicBlockStretchActionTarget(primary_entity_handle, 2, (1, 2))]
+                if primary_entity_handle
+                else []
+            ),
+            *[
+                DynamicBlockStretchActionTarget(attdef.dxf.handle, 1, (0,))
+                for attdef in source_attdefs
+                if attdef.dxf.handle
+            ],
+        ]
+    )
+    vector = (
+        float(parameter.end_point[0] - parameter.base_point[0]),
+        float(parameter.end_point[1] - parameter.base_point[1]),
+        float(parameter.end_point[2] - parameter.base_point[2]),
+    )
+    base_grip_label = parameter.base_grip_label or "Base Grip"
+    end_grip_label = parameter.end_grip_label or "End Grip"
+
+    linear_entity = _new_tag_storage_object(
+        doc,
+        "BLOCKLINEARPARAMETER",
+        graph.dxf.handle,
+        [
+            [(100, "AcDbEvalExpr"), (90, 45), (98, 33), (99, 378)],
+            [(100, "AcDbBlockElement"), (300, parameter.label), (98, 33), (99, 378), (1071, 32)],
+            [(100, "AcDbBlockParameter"), (280, 1), (281, 0)],
+            [
+                (100, "AcDbBlock2PtParameter"),
+                (1010, parameter.base_point),
+                (1011, parameter.end_point),
+                (170, 4),
+                (91, 49),
+                (91, 46),
+                (91, 0),
+                (91, 0),
+                (171, 1),
+                (92, 49),
+                (301, "DisplacementX"),
+                (172, 1),
+                (93, 49),
+                (302, "DisplacementY"),
+                (173, 1),
+                (94, 46),
+                (303, "DisplacementX"),
+                (174, 1),
+                (95, 46),
+                (304, "DisplacementY"),
+                (177, 0),
+            ],
+            [
+                (100, "AcDbBlockLinearParameter"),
+                (305, parameter.parameter_name),
+                (306, parameter.description),
+                (140, parameter.distance),
+                (307, ""),
+                (96, 1),
+                (141, 0.0),
+                (142, 0.0),
+                (143, 0.0),
+                (175, 0),
+            ],
+        ],
+    )
+    end_grip = _new_tag_storage_object(
+        doc,
+        "BLOCKLINEARGRIP",
+        graph.dxf.handle,
+        [
+            [(100, "AcDbEvalExpr"), (90, 46), (98, 33), (99, 378)],
+            [(100, "AcDbBlockElement"), (300, end_grip_label), (98, 33), (99, 378), (1071, 0)],
+            [(100, "AcDbBlockGrip"), (91, 47), (92, 48), (1010, parameter.end_point), (280, 1), (93, -1)],
+            [(100, "AcDbBlockLinearGrip"), (140, vector[0]), (141, vector[1]), (142, vector[2])],
+        ],
+    )
+    end_x = _new_tag_storage_object(
+        doc,
+        "BLOCKGRIPLOCATIONCOMPONENT",
+        graph.dxf.handle,
+        [
+            [(100, "AcDbEvalExpr"), (90, 47), (98, 33), (99, 378), (1, ""), (70, 40), (140, 1.797693134862314e+99)],
+            [(100, "AcDbBlockGripExpr"), (91, 45), (300, "UpdatedEndX")],
+        ],
+    )
+    end_y = _new_tag_storage_object(
+        doc,
+        "BLOCKGRIPLOCATIONCOMPONENT",
+        graph.dxf.handle,
+        [
+            [(100, "AcDbEvalExpr"), (90, 48), (98, 33), (99, 378), (1, ""), (70, 40), (140, 1.797693134862314e+99)],
+            [(100, "AcDbBlockGripExpr"), (91, 45), (300, "UpdatedEndY")],
+        ],
+    )
+    base_grip = _new_tag_storage_object(
+        doc,
+        "BLOCKLINEARGRIP",
+        graph.dxf.handle,
+        [
+            [(100, "AcDbEvalExpr"), (90, 49), (98, 33), (99, 378)],
+            [(100, "AcDbBlockElement"), (300, base_grip_label), (98, 33), (99, 378), (1071, 0)],
+            [(100, "AcDbBlockGrip"), (91, 50), (92, 51), (1010, parameter.base_point), (280, 1), (93, -1)],
+            [(100, "AcDbBlockLinearGrip"), (140, -vector[0]), (141, -vector[1]), (142, -vector[2])],
+        ],
+    )
+    base_x = _new_tag_storage_object(
+        doc,
+        "BLOCKGRIPLOCATIONCOMPONENT",
+        graph.dxf.handle,
+        [
+            [(100, "AcDbEvalExpr"), (90, 50), (98, 33), (99, 378), (1, ""), (70, 40), (140, 0.0)],
+            [(100, "AcDbBlockGripExpr"), (91, 45), (300, "UpdatedBaseX")],
+        ],
+    )
+    base_y = _new_tag_storage_object(
+        doc,
+        "BLOCKGRIPLOCATIONCOMPONENT",
+        graph.dxf.handle,
+        [
+            [(100, "AcDbEvalExpr"), (90, 51), (98, 33), (99, 378), (1, ""), (70, 40), (140, 0.0)],
+            [(100, "AcDbBlockGripExpr"), (91, 45), (300, "UpdatedBaseY")],
+        ],
+    )
+    stretch = _new_tag_storage_object(
+        doc,
+        "BLOCKSTRETCHACTION",
+        graph.dxf.handle,
+        [
+            [(100, "AcDbEvalExpr"), (90, 52), (98, 33), (99, 378)],
+            [(100, "AcDbBlockElement"), (300, stretch_action.label), (98, 33), (99, 378), (1071, 0)],
+            [
+                (100, "AcDbBlockAction"),
+                (70, 1),
+                (91, 32),
+                (71, len(dependency_handles)),
+                *[(330, handle) for handle in dependency_handles],
+                (1010, stretch_action.action_location),
+            ],
+            [
+                (100, "AcDbBlockStretchAction"),
+                (92, 45),
+                (301, stretch_action.x_name or "EndXDelta"),
+                (93, 45),
+                (302, stretch_action.y_name or "EndYDelta"),
+                (72, len(stretch_action.selection_window)),
+                *[(1011, point) for point in stretch_action.selection_window],
+                (73, len(targets)),
+                *[
+                    tag
+                    for target in targets
+                    for tag in (
+                        (331, target.entity_handle),
+                        (74, target.mode),
+                        *[(94, component) for component in target.components],
+                    )
+                ],
+                (75, 1),
+                (95, 32),
+                (76, 1),
+                (94, 0),
+                (140, 1.0),
+                (141, 0.0),
+                (280, 0),
+            ],
+        ],
+    )
+
+    vis_subclass = visibility_entity.xtags.get_subclass("AcDbBlockVisibilityParameter")
+    _replace_subclass_tags(
+        vis_subclass,
+        _build_property_visibility_parameter_subclass(
+            linear_visibility,
+            table_entity.dxf.handle,
+            table_grip.dxf.handle,
+            extra_state_refs=((base_grip.dxf.handle, linear_entity.dxf.handle, end_grip.dxf.handle, stretch.dxf.handle), (), ()),
+            all_handles=linear_visibility.all_entity_handles,
+        ),
+    )
+    _replace_subclass_tags(graph.xtags.get_subclass("AcDbEvalGraph"), _build_linear_eval_graph_subclass())
+    _patch_eval_graph_handles(
+        graph,
+        [
+            visibility_entity.dxf.handle,
+            proxy.dxf.handle,
+            table_entity.dxf.handle,
+            table_grip.dxf.handle,
+            x_comp.dxf.handle,
+            y_comp.dxf.handle,
+            linear_entity.dxf.handle,
+            end_grip.dxf.handle,
+            end_x.dxf.handle,
+            end_y.dxf.handle,
+            base_grip.dxf.handle,
+            base_x.dxf.handle,
+            base_y.dxf.handle,
+            stretch.dxf.handle,
+        ],
+    )
+    return DynamicBlockLinearParameter(
+        handle=linear_entity.dxf.handle or "",
+        label=parameter.label,
+        parameter_name=parameter.parameter_name,
+        description=parameter.description,
+        base_point=parameter.base_point,
+        end_point=parameter.end_point,
+        distance=parameter.distance,
+        expr_id=45,
+        base_grip_handle=base_grip.dxf.handle or "",
+        end_grip_handle=end_grip.dxf.handle or "",
+        base_grip_label=base_grip_label,
+        end_grip_label=end_grip_label,
     )
 
 
@@ -1635,6 +2434,7 @@ def set_dynamic_block_properties_editor_support(
     source_attdefs = _get_property_attdefs(block)
     visible_state_name = visibility.states[0].name if visibility.states else ""
     state_names = [state.name for state in visibility.states]
+    linear_parameters = get_dynamic_block_linear_parameters(block)
 
     def add_hidden_representation(
         *,
@@ -1728,6 +2528,134 @@ def set_dynamic_block_properties_editor_support(
             and len(properties.rows) == 27
             and len(state_names) == 3
         )
+
+    def use_linear_golden_style_templates() -> bool:
+        return use_golden_style_templates() and len(linear_parameters) == 1
+
+    if use_linear_golden_style_templates():
+        pair = (0, 1)
+        triple_heads = (0, 1)
+        triple_all = (0, 1, 2)
+
+        for _ in range(2):
+            add_hidden_representation(state_name=None, carrier_count=0, carrier_text="", carriers_visible=True)
+        for state_name in state_names:
+            add_hidden_representation(state_name=state_name, carrier_count=0, carrier_text="", carriers_visible=True)
+
+        for _ in range(8):
+            add_hidden_representation(
+                state_name=visible_state_name,
+                carrier_count=2,
+                carrier_text="",
+                carriers_visible=True,
+                carrier_metadata_indices=(),
+                carrier_reactor_indices=pair,
+            )
+        for _ in range(25):
+            add_hidden_representation(
+                state_name=state_names[1],
+                carrier_count=2,
+                carrier_text="",
+                carriers_visible=False,
+                carrier_metadata_indices=(),
+                carrier_reactor_indices=pair,
+            )
+        for _ in range(23):
+            add_hidden_representation(
+                state_name=state_names[2],
+                carrier_count=2,
+                carrier_text="",
+                carriers_visible=False,
+                carrier_metadata_indices=(),
+                carrier_reactor_indices=pair,
+            )
+
+        for _ in range(1):
+            add_hidden_representation(
+                state_name=state_names[1],
+                carrier_count=3,
+                carrier_text="",
+                carriers_visible=False,
+                carrier_metadata_indices=triple_heads,
+                carrier_reactor_indices=triple_all,
+            )
+        for _ in range(3):
+            add_hidden_representation(
+                state_name=state_names[2],
+                carrier_count=3,
+                carrier_text="",
+                carriers_visible=False,
+                carrier_metadata_indices=triple_heads,
+                carrier_reactor_indices=triple_all,
+            )
+
+        for _ in range(1):
+            add_hidden_representation(
+                state_name=state_names[1],
+                carrier_count=3,
+                carrier_text="Block Table 1",
+                carriers_visible=False,
+                carrier_metadata_indices=triple_heads,
+                carrier_reactor_indices=triple_all,
+            )
+        for _ in range(2):
+            add_hidden_representation(
+                state_name=state_names[2],
+                carrier_count=3,
+                carrier_text="Block Table 1",
+                carriers_visible=False,
+                carrier_metadata_indices=triple_heads,
+                carrier_reactor_indices=triple_all,
+            )
+
+        for _ in range(5):
+            add_hidden_representation(
+                state_name=visible_state_name,
+                carrier_count=3,
+                carrier_text=properties.table_name,
+                carriers_visible=True,
+                carrier_metadata_indices=triple_all,
+                carrier_reactor_indices=triple_all,
+            )
+        for _ in range(1):
+            add_hidden_representation(
+                state_name=state_names[1],
+                carrier_count=3,
+                carrier_text=properties.table_name,
+                carriers_visible=True,
+                carrier_metadata_indices=triple_all,
+                carrier_reactor_indices=triple_all,
+            )
+        for _ in range(1):
+            add_hidden_representation(
+                state_name=state_names[2],
+                carrier_count=3,
+                carrier_text=properties.table_name,
+                carriers_visible=True,
+                carrier_metadata_indices=triple_all,
+                carrier_reactor_indices=triple_all,
+            )
+        for _ in range(8):
+            add_hidden_representation(
+                state_name=state_names[1],
+                carrier_count=3,
+                carrier_text=properties.table_name,
+                carriers_visible=False,
+                carrier_metadata_indices=triple_all,
+                carrier_reactor_indices=triple_all,
+            )
+        for _ in range(6):
+            add_hidden_representation(
+                state_name=state_names[2],
+                carrier_count=3,
+                carrier_text=properties.table_name,
+                carriers_visible=False,
+                carrier_metadata_indices=triple_all,
+                carrier_reactor_indices=triple_all,
+            )
+
+        _set_root_assoc_children(root_network, child_networks)
+        return tuple(created)
 
     if use_golden_style_templates():
         pair = (0, 1)
