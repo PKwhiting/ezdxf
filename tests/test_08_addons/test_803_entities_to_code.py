@@ -15,11 +15,16 @@ from ezdxf.addons.dxf2code import (
     _fmt_dxf_tags,
 )
 from ezdxf.dynblkhelper import (
+    DynamicBlockPropertiesTable,
+    DynamicBlockPropertyColumn,
+    DynamicBlockPropertyRow,
     DynamicBlockVisibilityParameter,
     DynamicBlockVisibilityState,
+    get_dynamic_block_properties_table,
     get_dynamic_block_reference,
     get_dynamic_block_visibility_state,
     get_dynamic_block_visibility_states,
+    set_dynamic_block_properties_table,
     set_dynamic_block_reference,
     set_dynamic_block_visibility_parameter,
     set_dynamic_block_visibility_state,
@@ -1140,6 +1145,112 @@ def test_dynamic_visibility_blocks_to_code():
     assert get_dynamic_block_reference(new_inserts[0]) is not None
     assert get_dynamic_block_reference(new_inserts[1]) is not None
     assert new_doc.blocks.get("DYN_VIS_DXF2CODE") is not None
+
+
+def test_dynamic_block_properties_to_code():
+    source_doc = ezdxf.new("R2018")
+    source_msp = source_doc.modelspace()
+    base = source_doc.blocks.new("DYN_PROP_DXF2CODE")
+    common1 = base.add_line((0, 0), (1, 0))
+    common2 = base.add_line((0, 1), (1, 1))
+    state_a = base.add_circle((1, 1), radius=0.5)
+    state_b = base.add_lwpolyline([(0, 0), (1, 0), (0.5, 1)], close=True)
+    state_c1 = base.add_line((0, 0), (1, 1))
+    state_c2 = base.add_line((0, 1), (1, 0))
+    parameter = DynamicBlockVisibilityParameter(
+        handle="",
+        label="Visibility State",
+        parameter_name="Visibility1Param",
+        location=(0.0, 14.0, 0.0),
+        states=(
+            DynamicBlockVisibilityState(
+                "STATE_A",
+                (common1.dxf.handle, common2.dxf.handle, state_a.dxf.handle),
+            ),
+            DynamicBlockVisibilityState(
+                "STATE_B",
+                (common1.dxf.handle, common2.dxf.handle, state_b.dxf.handle),
+            ),
+            DynamicBlockVisibilityState(
+                "STATE_C",
+                (
+                    common1.dxf.handle,
+                    common2.dxf.handle,
+                    state_c1.dxf.handle,
+                    state_c2.dxf.handle,
+                ),
+            ),
+        ),
+    )
+    set_dynamic_block_visibility_parameter(base, parameter, guid="{GUID}")
+    props = DynamicBlockPropertiesTable(
+        handle="",
+        label="Block Table",
+        table_name="Block Table1",
+        description="",
+        location=(32.0, 20.0, 0.0),
+        grip_location=(32.0, 20.0, 0.0),
+        columns=(
+            DynamicBlockPropertyColumn("", "ATTDEF", "PARAM_1", "Block Table1"),
+            DynamicBlockPropertyColumn("", "ATTDEF", "PARAM_2", "Block Table1"),
+            DynamicBlockPropertyColumn("", "BLOCKVISIBILITYPARAMETER", "VisibilityState", "VisibilityState"),
+        ),
+        rows=(
+            DynamicBlockPropertyRow(0, ("A", "X", "STATE_A")),
+            DynamicBlockPropertyRow(1, ("A", "Y", "STATE_B")),
+            DynamicBlockPropertyRow(2, ("B", "Z", "STATE_C")),
+        ),
+    )
+    set_dynamic_block_properties_table(base, props)
+
+    def add_reference_block_and_insert(state: str, insert_point: tuple[float, float]):
+        anon = source_doc.blocks.new_anonymous_block(type_char="U")
+        anon.add_line((0, 0), (1, 0))
+        anon.add_line((0, 1), (1, 1))
+        anon.add_circle((1, 1), radius=0.5)
+        anon.add_lwpolyline([(0, 0), (1, 0), (0.5, 1)], close=True)
+        anon.add_line((0, 0), (1, 1))
+        anon.add_line((0, 1), (1, 0))
+        set_dynamic_block_reference(anon, base)
+        insert = source_msp.add_blockref(anon.name, insert_point)
+        set_dynamic_block_visibility_state(insert, base, state=state)
+        return insert
+
+    insert_a = add_reference_block_and_insert("STATE_A", (0, 0))
+    insert_c = add_reference_block_and_insert("STATE_C", (3, 0))
+
+    target_doc = ezdxf.new("R2018")
+    namespace = {"ezdxf": ezdxf, "doc": target_doc, "msp": target_doc.modelspace()}
+    execute_code_in_namespace(block_to_code(base, drawing="doc"), namespace)
+    execute_code_in_namespace(
+        block_to_code(get_dynamic_block_reference(insert_a), drawing="doc"),
+        namespace,
+    )
+    execute_code_in_namespace(
+        block_to_code(get_dynamic_block_reference(insert_c), drawing="doc"),
+        namespace,
+    )
+    execute_code_in_namespace(entities_to_code([insert_a, insert_c], layout="msp"), namespace)
+
+    new_doc = namespace["doc"]
+    new_inserts = list(namespace["msp"].query("INSERT"))
+    new_base = new_doc.blocks.get("DYN_PROP_DXF2CODE")
+    new_props = get_dynamic_block_properties_table(new_base)
+
+    assert new_props is not None
+    assert new_props.table_name == "Block Table1"
+    assert [column.name for column in new_props.columns] == [
+        "PARAM_1",
+        "PARAM_2",
+        "VisibilityState",
+    ]
+    assert [row.values for row in new_props.rows] == [
+        ("A", "X", "STATE_A"),
+        ("A", "Y", "STATE_B"),
+        ("B", "Z", "STATE_C"),
+    ]
+    assert get_dynamic_block_visibility_state(new_inserts[0]) == "STATE_A"
+    assert get_dynamic_block_visibility_state(new_inserts[1]) == "STATE_C"
 
 
 if __name__ == "__main__":
