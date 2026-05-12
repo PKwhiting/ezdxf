@@ -10,7 +10,11 @@ from ezdxf.dynblkhelper import (
     get_dynamic_block_definition,
     get_dynamic_block_properties_table,
     get_dynamic_block_property_columns,
+    get_dynamic_block_property_assoc_networks,
+    get_dynamic_block_property_representation_families,
+    get_dynamic_block_property_representations,
     get_dynamic_block_property_rows,
+    set_dynamic_block_properties_editor_support,
     get_dynamic_block_reference,
     get_dynamic_block_visibility_entities,
     get_dynamic_block_visibility_parameter,
@@ -163,6 +167,7 @@ def make_dynamic_properties_insert(doc):
         ),
     )
     set_dynamic_block_properties_table(base, table)
+    set_dynamic_block_properties_editor_support(base, table)
 
     anon = doc.blocks.new_anonymous_block(type_char="U")
     anon.add_line((0, 0), (1, 0))
@@ -397,6 +402,20 @@ def test_dynamic_block_writer_applies_invisible_mask_to_default_and_active_state
     assert ref_invisible == [0, 0, 1, 1, 0, 0]
 
 
+def test_dynamic_block_properties_writer_adds_visibility_only_support_blocks():
+    doc = ezdxf.new("R2018")
+    insert = make_dynamic_properties_insert(doc)
+
+    assert insert is not None
+    zero_carrier_blocks = []
+    for block in doc.blocks:
+        if not block.name.startswith("*U"):
+            continue
+        if not any(entity.dxftype() == "ATTDEF" for entity in block):
+            zero_carrier_blocks.append(block)
+    assert len(zero_carrier_blocks) == 5
+
+
 def test_get_dynamic_block_properties_table_reads_columns_rows_and_grip_location():
     doc = ezdxf.new("R2018")
     insert = make_dynamic_properties_insert(doc)
@@ -462,12 +481,33 @@ def test_dynamic_block_properties_writer_adds_attdef_support_metadata():
 def test_dynamic_block_properties_writer_clones_attdefs_into_active_reference():
     doc = ezdxf.new("R2018")
     insert = make_dynamic_properties_insert(doc)
+    table = get_dynamic_block_properties_table(insert)
     ref = get_dynamic_block_reference(insert)
 
+    assert table is not None
     assert ref is not None
     attdefs = [entity for entity in ref if entity.dxftype() == "ATTDEF"]
     assert [attdef.dxf.tag for attdef in attdefs] == ["PARAM_1", "PARAM_2", "PARAM_3"]
     assert [attdef.dxf.get("invisible", 0) for attdef in attdefs] == [0, 0, 0]
+    assert [attdef.get_reactors() for attdef in attdefs] == [[table.handle], [table.handle], [table.handle]]
+
+
+def test_dynamic_block_properties_writer_marks_property_graph_links():
+    doc = ezdxf.new("R2018")
+    insert = make_dynamic_properties_insert(doc)
+    base = get_dynamic_block_definition(insert)
+    table = get_dynamic_block_properties_table(insert)
+
+    assert base is not None
+    assert table is not None
+    assert base.block_record.has_xdata("AcDbDynamicBlockTrueName2") is True
+    assert base.block_record.has_xdata("AcDbDynamicBlockTrueName") is False
+
+    graph = next(obj for obj in doc.objects if obj.dxftype() == "ACAD_EVALUATION_GRAPH")
+    visibility = next(obj for obj in doc.objects if obj.dxftype() == "BLOCKVISIBILITYPARAMETER")
+
+    assert graph.has_xdata("AcadBPTGraphNodeId") is True
+    assert visibility.get_reactors() == [table.handle]
 
 
 def test_dynamic_block_properties_writer_hides_attdefs_for_nondefault_state():
@@ -482,3 +522,81 @@ def test_dynamic_block_properties_writer_hides_attdefs_for_nondefault_state():
 
     attdefs = [entity for entity in ref if entity.dxftype() == "ATTDEF"]
     assert [attdef.dxf.get("invisible", 0) for attdef in attdefs] == [1, 1, 1]
+
+
+def test_dynamic_block_properties_writer_root_assocnetwork_is_direct():
+    doc = ezdxf.new("R2018")
+    insert = make_dynamic_properties_insert(doc)
+
+    assert insert is not None
+    root = doc.rootdict.get("ACAD_ASSOCNETWORK")
+    assert root is not None
+    assert root.dxftype() == "DICTIONARY"
+    assoc = root.get("ACAD_ASSOCNETWORK")
+    assert assoc is not None
+    assert assoc.dxftype() == "ACDBASSOCNETWORK"
+
+
+def test_dynamic_block_properties_writer_sets_table_reactors_on_hidden_carriers():
+    doc = ezdxf.new("R2018")
+    insert = make_dynamic_properties_insert(doc)
+    table = get_dynamic_block_properties_table(insert)
+    reps = [rep for rep in get_dynamic_block_property_representations(insert) if not rep.is_active]
+
+    assert table is not None
+    assert reps
+    hidden_block = doc.blocks.get(reps[0].block_name)
+    assert hidden_block is not None
+    for attdef in hidden_block:
+        if attdef.dxftype() == "ATTDEF":
+            assert attdef.get_reactors() == [table.handle]
+
+
+def test_dynamic_block_property_assoc_networks_are_empty_for_minimal_authored_fixture():
+    doc = ezdxf.new("R2018")
+    insert = make_dynamic_properties_insert(doc)
+
+    networks = get_dynamic_block_property_assoc_networks(insert)
+
+    assert len(networks) == 3
+    assert [(var.name, var.value) for var in networks[0].variables] == [
+        ("user1", "1"),
+        ("user2", "1"),
+    ]
+
+
+def test_dynamic_block_property_representations_include_active_blocks():
+    doc = ezdxf.new("R2018")
+    insert = make_dynamic_properties_insert(doc)
+
+    reps = get_dynamic_block_property_representations(insert)
+
+    assert len(reps) == 7
+    rep = next(r for r in reps if r.is_active)
+    assert rep.is_active is True
+    assert rep.block_name.startswith("*U")
+    assert [carrier.tag for carrier in rep.carriers] == ["PARAM_1", "PARAM_2", "PARAM_3"]
+    assert [carrier.invisible for carrier in rep.carriers] == [0, 0, 0]
+
+
+def test_dynamic_block_property_representation_families_group_by_signature():
+    doc = ezdxf.new("R2018")
+    insert = make_dynamic_properties_insert(doc)
+
+    families = get_dynamic_block_property_representation_families(insert)
+
+    assert len(families) == 5
+    counts = {
+        (
+            family.carrier_count,
+            family.carrier_texts,
+            family.carrier_visibility,
+            family.assoc_signature,
+        ): len(family.block_names)
+        for family in families
+    }
+    assert counts[(2, ("", ""), (0, 0), (("user1", "1"), ("user2", "1")))] == 1
+    assert counts[(2, ("", ""), (1, 1), (("user1", "2"), ("user2", "1")))] == 1
+    assert counts[(2, ("", ""), (1, 1), (("user1", "3"), ("user2", "2")))] == 1
+    assert counts[(3, ("Block Table1", "Block Table1", "Block Table1"), (0, 0, 0), ())] == 2
+    assert counts[(3, ("Block Table1", "Block Table1", "Block Table1"), (1, 1, 1), ())] == 2

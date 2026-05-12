@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING, Any, Iterable, Mapping, Optional
 import json
 
 from ezdxf.sections.tables import TABLENAMES
+from ezdxf.lldxf import const
 from ezdxf.lldxf.tags import Tags
 from ezdxf.entities import BoundaryPathType, EdgeType
 from ezdxf.render.arrows import ARROWS
@@ -639,7 +640,10 @@ class _SourceCodeGenerator:
         try:
             return str(block_record.get_xdata("AcDbDynamicBlockTrueName").get_first_value(1000, ""))
         except const.DXFValueError:
-            return block_record.dxf.name
+            try:
+                return str(block_record.get_xdata("AcDbDynamicBlockTrueName2").get_first_value(1000, ""))
+            except const.DXFValueError:
+                return block_record.dxf.name
 
     def _emit_dynamic_block_metadata(self, block) -> None:
         from ezdxf.dynblkhelper import (
