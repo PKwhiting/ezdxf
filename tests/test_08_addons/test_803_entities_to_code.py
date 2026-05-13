@@ -16,6 +16,9 @@ from ezdxf.addons.dxf2code import (
 )
 from ezdxf.dynblkhelper import (
     DynamicBlockLinearParameter,
+    DynamicBlockLookupAction,
+    DynamicBlockLookupActionBinding,
+    DynamicBlockLookupParameter,
     DynamicBlockPropertiesTable,
     DynamicBlockPropertyColumn,
     DynamicBlockPropertyRow,
@@ -24,12 +27,15 @@ from ezdxf.dynblkhelper import (
     DynamicBlockVisibilityParameter,
     DynamicBlockVisibilityState,
     get_dynamic_block_linear_parameters,
+    get_dynamic_block_lookup_actions,
+    get_dynamic_block_lookup_parameters,
     get_dynamic_block_properties_table,
     get_dynamic_block_reference,
     get_dynamic_block_stretch_actions,
     get_dynamic_block_visibility_state,
     get_dynamic_block_visibility_states,
     set_dynamic_block_linear_parameter,
+    set_dynamic_block_lookup_parameter,
     set_dynamic_block_properties_table,
     set_dynamic_block_reference,
     set_dynamic_block_visibility_parameter,
@@ -1395,6 +1401,211 @@ def test_dynamic_block_linear_parameter_to_code():
     assert len(new_actions) == 1
     assert new_actions[0].label == "Stretch1"
     assert new_actions[0].selection_window == ((2.0, 1.0, 0.0), (0.5, -0.5, 0.0))
+    assert get_dynamic_block_visibility_state(new_inserts[0]) == "STATE_A"
+    assert get_dynamic_block_visibility_state(new_inserts[1]) == "STATE_C"
+
+
+def test_dynamic_block_lookup_parameter_to_code():
+    source_doc = ezdxf.new("R2018")
+    source_msp = source_doc.modelspace()
+    base = source_doc.blocks.new("DYN_PROP_LOOKUP_DXF2CODE")
+    common1 = base.add_line((0, 0), (1, 0))
+    common2 = base.add_line((0, 1), (1, 1))
+    state_a = base.add_circle((1, 1), radius=0.5)
+    state_b = base.add_lwpolyline([(0, 0), (1, 0), (0.5, 1)], close=True)
+    state_c1 = base.add_line((0, 0), (1, 1))
+    state_c2 = base.add_line((0, 1), (1, 0))
+    parameter = DynamicBlockVisibilityParameter(
+        handle="",
+        label="Visibility State",
+        parameter_name="Visibility1Param",
+        location=(0.0, 14.0, 0.0),
+        states=(
+            DynamicBlockVisibilityState(
+                "STATE_A",
+                (common1.dxf.handle, common2.dxf.handle, state_a.dxf.handle),
+            ),
+            DynamicBlockVisibilityState(
+                "STATE_B",
+                (common1.dxf.handle, common2.dxf.handle, state_b.dxf.handle),
+            ),
+            DynamicBlockVisibilityState(
+                "STATE_C",
+                (
+                    common1.dxf.handle,
+                    common2.dxf.handle,
+                    state_c1.dxf.handle,
+                    state_c2.dxf.handle,
+                ),
+            ),
+        ),
+    )
+    set_dynamic_block_visibility_parameter(base, parameter, guid="{GUID}")
+    props = DynamicBlockPropertiesTable(
+        handle="",
+        label="Block Table",
+        table_name="Block Table1",
+        description="",
+        location=(32.0, 20.0, 0.0),
+        grip_location=(32.0, 20.0, 0.0),
+        columns=(
+            DynamicBlockPropertyColumn("", "ATTDEF", "PARAM_1", "Block Table1"),
+            DynamicBlockPropertyColumn("", "ATTDEF", "PARAM_2", "Block Table1"),
+            DynamicBlockPropertyColumn("", "BLOCKVISIBILITYPARAMETER", "VisibilityState", "VisibilityState"),
+        ),
+        rows=(
+            DynamicBlockPropertyRow(0, ("A", "X", "STATE_A")),
+            DynamicBlockPropertyRow(1, ("A", "Y", "STATE_B")),
+            DynamicBlockPropertyRow(2, ("B", "Z", "STATE_C")),
+        ),
+    )
+    props = set_dynamic_block_properties_table(base, props)
+    grip = next(obj for obj in source_doc.objects if obj.dxftype() == "BLOCKPROPERTIESTABLEGRIP")
+    base_attdefs = {entity.dxf.tag: entity for entity in base if entity.dxftype() == "ATTDEF"}
+    linear = DynamicBlockLinearParameter(
+        handle="",
+        label="Linear",
+        parameter_name="Distance1",
+        description="",
+        base_point=(0.0, 0.0, 0.0),
+        end_point=(1.0, 0.0, 0.0),
+        distance=1.0,
+        expr_id=0,
+        base_grip_label="Base Grip",
+        end_grip_label="End Grip",
+    )
+    stretch = DynamicBlockStretchAction(
+        handle="",
+        label="Stretch1",
+        action_location=(1.0, -0.5, 0.0),
+        x_expr_id=0,
+        x_name="EndXDelta",
+        y_expr_id=0,
+        y_name="EndYDelta",
+        selection_window=((2.0, 1.0, 0.0), (0.5, -0.5, 0.0)),
+        dependency_handles=(
+            grip.dxf.handle,
+            props.handle,
+            base_attdefs["PARAM_2"].dxf.handle,
+            base_attdefs["PARAM_1"].dxf.handle,
+            common1.dxf.handle,
+        ),
+        targets=(
+            DynamicBlockStretchActionTarget(common1.dxf.handle, 2, (1, 2)),
+            DynamicBlockStretchActionTarget(base_attdefs["PARAM_1"].dxf.handle, 1, (0,)),
+            DynamicBlockStretchActionTarget(base_attdefs["PARAM_2"].dxf.handle, 1, (0,)),
+        ),
+    )
+    set_dynamic_block_linear_parameter(base, linear, stretch)
+    lookup = DynamicBlockLookupParameter(
+        handle="",
+        label="Lookup",
+        parameter_name="Lookup1",
+        description="",
+        location=(19.28, 23.15, 0.0),
+        expr_id=0,
+        action_expr_id=75,
+        grip_label="Grip",
+    )
+    helper_action = DynamicBlockLookupAction(
+        handle="",
+        label="Lookup1",
+        action_location=(16.5, 19.5, 0.0),
+        expr_id=57,
+        row_count=5,
+        column_count=1,
+        entries=(("0",), ("8",), ("7",), ("6",), ("5",)),
+        bindings=(
+            DynamicBlockLookupActionBinding(
+                group_label="",
+                expr_id=45,
+                value_code=40,
+                value_type=2,
+                flag282=0,
+                display_name="Custom",
+                flag281=0,
+                property_name="UpdatedDistance",
+            ),
+        ),
+        enabled=1,
+    )
+    public_action = DynamicBlockLookupAction(
+        handle="",
+        label="Lookup3",
+        action_location=(20.01, 22.42, 0.0),
+        expr_id=75,
+        row_count=5,
+        column_count=2,
+        entries=(("10", "len 1"), ("20", "len 2"), ("32", "len 3"), ("40", "len 4"), ("50", "len 5")),
+        bindings=(
+            DynamicBlockLookupActionBinding(
+                group_label="",
+                expr_id=45,
+                value_code=40,
+                value_type=2,
+                flag282=0,
+                display_name="Custom",
+                flag281=0,
+                property_name="UpdatedDistance",
+            ),
+            DynamicBlockLookupActionBinding(
+                group_label="",
+                expr_id=71,
+                value_code=1,
+                value_type=0,
+                flag282=1,
+                display_name="Custom",
+                flag281=1,
+                property_name="lookupString",
+            ),
+        ),
+        enabled=1,
+    )
+    set_dynamic_block_lookup_parameter(base, lookup, (helper_action, public_action))
+
+    def add_reference_block_and_insert(state: str, insert_point: tuple[float, float]):
+        anon = source_doc.blocks.new_anonymous_block(type_char="U")
+        anon.add_line((0, 0), (1, 0))
+        anon.add_line((0, 1), (1, 1))
+        anon.add_circle((1, 1), radius=0.5)
+        anon.add_lwpolyline([(0, 0), (1, 0), (0.5, 1)], close=True)
+        anon.add_line((0, 0), (1, 1))
+        anon.add_line((0, 1), (1, 0))
+        set_dynamic_block_reference(anon, base)
+        insert = source_msp.add_blockref(anon.name, insert_point)
+        set_dynamic_block_visibility_state(insert, base, state=state)
+        return insert
+
+    insert_a = add_reference_block_and_insert("STATE_A", (0, 0))
+    insert_c = add_reference_block_and_insert("STATE_C", (3, 0))
+
+    target_doc = ezdxf.new("R2018")
+    namespace = {"ezdxf": ezdxf, "doc": target_doc, "msp": target_doc.modelspace()}
+    execute_code_in_namespace(block_to_code(base, drawing="doc"), namespace)
+    execute_code_in_namespace(
+        block_to_code(get_dynamic_block_reference(insert_a), drawing="doc"),
+        namespace,
+    )
+    execute_code_in_namespace(
+        block_to_code(get_dynamic_block_reference(insert_c), drawing="doc"),
+        namespace,
+    )
+    execute_code_in_namespace(entities_to_code([insert_a, insert_c], layout="msp"), namespace)
+
+    new_doc = namespace["doc"]
+    new_inserts = list(namespace["msp"].query("INSERT"))
+    new_base = new_doc.blocks.get("DYN_PROP_LOOKUP_DXF2CODE")
+    new_linear = get_dynamic_block_linear_parameters(new_base)
+    new_lookup = get_dynamic_block_lookup_parameters(new_base)
+    new_lookup_actions = get_dynamic_block_lookup_actions(new_base)
+
+    assert len(new_linear) == 1
+    assert new_linear[0].allowed_values == (10.0, 20.0, 32.0, 40.0, 50.0)
+    assert len(new_lookup) == 1
+    assert new_lookup[0].parameter_name == "Lookup1"
+    assert new_lookup[0].grip_label == "Grip"
+    assert len(new_lookup_actions) == 2
+    assert {action.label for action in new_lookup_actions} == {"Lookup1", "Lookup3"}
     assert get_dynamic_block_visibility_state(new_inserts[0]) == "STATE_A"
     assert get_dynamic_block_visibility_state(new_inserts[1]) == "STATE_C"
 

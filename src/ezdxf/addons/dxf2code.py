@@ -648,6 +648,8 @@ class _SourceCodeGenerator:
     def _emit_dynamic_block_metadata(self, block) -> None:
         from ezdxf.dynblkhelper import (
             get_dynamic_block_linear_parameters,
+            get_dynamic_block_lookup_actions,
+            get_dynamic_block_lookup_parameters,
             get_dynamic_block_properties_table,
             get_dynamic_block_record_handle,
             get_dynamic_block_stretch_actions,
@@ -658,6 +660,8 @@ class _SourceCodeGenerator:
         block_record = block.block_record
         if is_dynamic_block_definition(block_record):
             linear_parameters = get_dynamic_block_linear_parameters(block)
+            lookup_parameters = get_dynamic_block_lookup_parameters(block)
+            lookup_actions = get_dynamic_block_lookup_actions(block)
             parameter = get_dynamic_block_visibility_parameter(block)
             properties_table = get_dynamic_block_properties_table(block)
             stretch_actions = get_dynamic_block_stretch_actions(block)
@@ -822,6 +826,109 @@ class _SourceCodeGenerator:
                     self.add_source_code_line(
                         f"set_dynamic_block_linear_parameter(b, {linear_var}, {action_var})"
                     )
+            if properties_table is not None and lookup_parameters:
+                self.add_import_statement(
+                    "from ezdxf.dynblkhelper import DynamicBlockLookupParameter, DynamicBlockLookupAction, DynamicBlockLookupActionBinding, set_dynamic_block_lookup_parameter"
+                )
+                if len(lookup_parameters) != 1 or len(lookup_actions) != 2:
+                    self.add_source_code_line(
+                        "# unsupported dynamic block lookup metadata"
+                    )
+                    return
+                lookup = lookup_parameters[0]
+                action_vars: list[str] = []
+                for index, action in enumerate(lookup_actions):
+                    bindings_var = f"_dyn_lookup_bindings_{index}"
+                    action_var = f"_dyn_lookup_action_{index}"
+                    action_vars.append(action_var)
+                    self.add_source_code_line(f"{bindings_var} = (")
+                    for binding in action.bindings:
+                        self.add_source_code_line(
+                            "    DynamicBlockLookupActionBinding("
+                        )
+                        self.add_source_code_line(
+                            f"        group_label={json.dumps(binding.group_label)},"
+                        )
+                        self.add_source_code_line(
+                            f"        expr_id={self._format_python_value(binding.expr_id)},"
+                        )
+                        self.add_source_code_line(
+                            f"        value_code={self._format_python_value(binding.value_code)},"
+                        )
+                        self.add_source_code_line(
+                            f"        value_type={self._format_python_value(binding.value_type)},"
+                        )
+                        self.add_source_code_line(
+                            f"        flag282={self._format_python_value(binding.flag282)},"
+                        )
+                        self.add_source_code_line(
+                            f"        display_name={json.dumps(binding.display_name)},"
+                        )
+                        self.add_source_code_line(
+                            f"        flag281={self._format_python_value(binding.flag281)},"
+                        )
+                        self.add_source_code_line(
+                            f"        property_name={json.dumps(binding.property_name)},"
+                        )
+                        self.add_source_code_line("    ),")
+                    self.add_source_code_line(")")
+                    self.add_source_code_line(f"{action_var} = DynamicBlockLookupAction(")
+                    self.add_source_code_line("    handle='',")
+                    self.add_source_code_line(
+                        f"    label={json.dumps(action.label)},"
+                    )
+                    self.add_source_code_line(
+                        f"    action_location={self._format_python_value(action.action_location)},"
+                    )
+                    self.add_source_code_line(
+                        f"    expr_id={self._format_python_value(action.expr_id)},"
+                    )
+                    self.add_source_code_line(
+                        f"    row_count={self._format_python_value(action.row_count)},"
+                    )
+                    self.add_source_code_line(
+                        f"    column_count={self._format_python_value(action.column_count)},"
+                    )
+                    self.add_source_code_line(
+                        f"    entries={self._format_python_value(action.entries)},"
+                    )
+                    self.add_source_code_line(
+                        f"    bindings={bindings_var},"
+                    )
+                    self.add_source_code_line(
+                        f"    enabled={self._format_python_value(action.enabled)},"
+                    )
+                    self.add_source_code_line(")")
+                self.add_source_code_line("_dyn_lookup = DynamicBlockLookupParameter(")
+                self.add_source_code_line("    handle='',")
+                self.add_source_code_line(
+                    f"    label={json.dumps(lookup.label)},"
+                )
+                self.add_source_code_line(
+                    f"    parameter_name={json.dumps(lookup.parameter_name)},"
+                )
+                self.add_source_code_line(
+                    f"    description={json.dumps(lookup.description)},"
+                )
+                self.add_source_code_line(
+                    f"    location={self._format_python_value(lookup.location)},"
+                )
+                self.add_source_code_line(
+                    f"    expr_id={self._format_python_value(lookup.expr_id)},"
+                )
+                self.add_source_code_line(
+                    f"    action_expr_id={self._format_python_value(lookup.action_expr_id)},"
+                )
+                self.add_source_code_line(
+                    f"    grip_label={json.dumps(lookup.grip_label)},"
+                )
+                self.add_source_code_line(")")
+                joined_action_vars = ", ".join(action_vars)
+                if len(action_vars) == 1:
+                    joined_action_vars += ","
+                self.add_source_code_line(
+                    f"set_dynamic_block_lookup_parameter(b, _dyn_lookup, ({joined_action_vars}))"
+                )
             return
 
         base_handle = get_dynamic_block_record_handle(block_record)

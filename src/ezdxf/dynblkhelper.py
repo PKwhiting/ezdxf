@@ -24,6 +24,10 @@ __all__ = [
     "DynamicBlockVisibilityParameter",
     "DynamicBlockLinearGrip",
     "DynamicBlockLinearParameter",
+    "DynamicBlockLookupGrip",
+    "DynamicBlockLookupParameter",
+    "DynamicBlockLookupActionBinding",
+    "DynamicBlockLookupAction",
     "DynamicBlockStretchActionTarget",
     "DynamicBlockStretchAction",
     "DynamicBlockPropertyColumn",
@@ -44,6 +48,9 @@ __all__ = [
     "get_dynamic_block_visibility_entities",
     "get_dynamic_block_linear_grips",
     "get_dynamic_block_linear_parameters",
+    "get_dynamic_block_lookup_grips",
+    "get_dynamic_block_lookup_parameters",
+    "get_dynamic_block_lookup_actions",
     "get_dynamic_block_stretch_actions",
     "get_dynamic_block_properties_table",
     "get_dynamic_block_property_columns",
@@ -52,6 +59,7 @@ __all__ = [
     "get_dynamic_block_property_representations",
     "get_dynamic_block_property_representation_families",
     "set_dynamic_block_linear_parameter",
+    "set_dynamic_block_lookup_parameter",
     "set_dynamic_block_properties_editor_support",
     "set_dynamic_block_properties_table",
     "set_dynamic_block_visibility_parameter",
@@ -312,6 +320,58 @@ class DynamicBlockLinearParameter:
     end_grip_handle: str = ""
     base_grip_label: str = ""
     end_grip_label: str = ""
+    value_set_type: int = 0
+    value_count: int = 0
+    allowed_values: tuple[float, ...] = ()
+
+
+@dataclass(frozen=True)
+class DynamicBlockLookupGrip:
+    handle: str
+    label: str
+    location: tuple[float, float, float]
+    expr_id: int
+    x_expr_id: int
+    y_expr_id: int
+    parameter_expr_id: int = -1
+
+
+@dataclass(frozen=True)
+class DynamicBlockLookupParameter:
+    handle: str
+    label: str
+    parameter_name: str
+    description: str
+    location: tuple[float, float, float]
+    expr_id: int
+    action_expr_id: int
+    grip_handle: str = ""
+    grip_label: str = ""
+
+
+@dataclass(frozen=True)
+class DynamicBlockLookupActionBinding:
+    group_label: str
+    expr_id: int
+    value_code: int
+    value_type: int
+    flag282: int
+    display_name: str
+    flag281: int
+    property_name: str
+
+
+@dataclass(frozen=True)
+class DynamicBlockLookupAction:
+    handle: str
+    label: str
+    action_location: tuple[float, float, float]
+    expr_id: int
+    row_count: int
+    column_count: int
+    entries: tuple[tuple[str, ...], ...]
+    bindings: tuple[DynamicBlockLookupActionBinding, ...]
+    enabled: int
 
 
 @dataclass(frozen=True)
@@ -550,6 +610,15 @@ def _eval_expr_id(entity: DXFTagStorage) -> int:
         return -1
 
 
+def _get_subclass(entity: DXFTagStorage, *names: str):
+    for name in names:
+        try:
+            return entity.xtags.get_subclass(name)
+        except const.DXFKeyError:
+            continue
+    raise const.DXFKeyError(names[0])
+
+
 def _parse_linear_grip(entity: DXFTagStorage) -> Optional[DynamicBlockLinearGrip]:
     if entity.dxftype() != "BLOCKLINEARGRIP":
         return None
@@ -596,6 +665,7 @@ def _parse_linear_parameter(
     grip_expr_ids = [int(tag.value) for tag in point_tags if tag.code == 91]
     base_grip = grips_by_expr.get(grip_expr_ids[0], None) if len(grip_expr_ids) > 0 else None
     end_grip = grips_by_expr.get(grip_expr_ids[1], None) if len(grip_expr_ids) > 1 else None
+    allowed_values = tuple(float(tag.value) for tag in linear_tags if tag.code == 144)
     return DynamicBlockLinearParameter(
         handle=entity.dxf.handle or "",
         label=str(element_tags.get_first_value(300, "")),
@@ -609,6 +679,147 @@ def _parse_linear_parameter(
         end_grip_handle=end_grip.handle if end_grip is not None else "",
         base_grip_label=base_grip.label if base_grip is not None else "",
         end_grip_label=end_grip.label if end_grip is not None else "",
+        value_set_type=int(linear_tags.get_first_value(96, 0)),
+        value_count=int(linear_tags.get_first_value(175, 0)),
+        allowed_values=allowed_values,
+    )
+
+
+def _parse_grip_component(entity: DXFTagStorage) -> Optional[tuple[int, int, str]]:
+    if entity.dxftype() != "BLOCKGRIPLOCATIONCOMPONENT":
+        return None
+    try:
+        eval_tags = entity.xtags.get_subclass("AcDbEvalExpr")
+        grip_expr_tags = entity.xtags.get_subclass("AcDbBlockGripExpr")
+    except const.DXFKeyError:
+        return None
+    return (
+        int(eval_tags.get_first_value(90, -1)),
+        int(grip_expr_tags.get_first_value(91, -1)),
+        str(grip_expr_tags.get_first_value(300, "")),
+    )
+
+
+def _parse_lookup_grip(entity: DXFTagStorage) -> Optional[DynamicBlockLookupGrip]:
+    if entity.dxftype() != "BLOCKLOOKUPGRIP":
+        return None
+    try:
+        element_tags = entity.xtags.get_subclass("AcDbBlockElement")
+        grip_tags = entity.xtags.get_subclass("AcDbBlockGrip")
+        _get_subclass(entity, "AcDbBlockLookUpGrip", "AcDbBlockLookupGrip")
+    except const.DXFKeyError:
+        return None
+    location = grip_tags.get_first_value(1010, None)
+    if location is None:
+        return None
+    return DynamicBlockLookupGrip(
+        handle=entity.dxf.handle or "",
+        label=str(element_tags.get_first_value(300, "")),
+        location=_point3d(location),
+        expr_id=_eval_expr_id(entity),
+        x_expr_id=int(grip_tags.get_first_value(91, -1)),
+        y_expr_id=int(grip_tags.get_first_value(92, -1)),
+    )
+
+
+def _parse_lookup_parameter(
+    entity: DXFTagStorage,
+    grips_by_param_expr: dict[int, DynamicBlockLookupGrip],
+) -> Optional[DynamicBlockLookupParameter]:
+    if entity.dxftype() != "BLOCKLOOKUPPARAMETER":
+        return None
+    try:
+        element_tags = entity.xtags.get_subclass("AcDbBlockElement")
+        point_tags = entity.xtags.get_subclass("AcDbBlock1PtParameter")
+        lookup_tags = _get_subclass(entity, "AcDbBlockLookUpParameter", "AcDbBlockLookupParameter")
+    except const.DXFKeyError:
+        return None
+    location = point_tags.get_first_value(1010, None)
+    if location is None:
+        return None
+    expr_id = _eval_expr_id(entity)
+    grip = grips_by_param_expr.get(expr_id, None)
+    return DynamicBlockLookupParameter(
+        handle=entity.dxf.handle or "",
+        label=str(element_tags.get_first_value(300, "")),
+        parameter_name=str(lookup_tags.get_first_value(303, "")),
+        description=str(lookup_tags.get_first_value(304, "")),
+        location=_point3d(location),
+        expr_id=expr_id,
+        action_expr_id=int(lookup_tags.get_first_value(94, -1)),
+        grip_handle=grip.handle if grip is not None else "",
+        grip_label=grip.label if grip is not None else "",
+    )
+
+
+def _parse_lookup_action(entity: DXFTagStorage) -> Optional[DynamicBlockLookupAction]:
+    if entity.dxftype() != "BLOCKLOOKUPACTION":
+        return None
+    try:
+        element_tags = entity.xtags.get_subclass("AcDbBlockElement")
+        action_tags = entity.xtags.get_subclass("AcDbBlockAction")
+        lookup_tags = list(entity.xtags.get_subclass("AcDbBlockLookupAction"))
+    except const.DXFKeyError:
+        return None
+    action_location = action_tags.get_first_value(1010, None)
+    if action_location is None:
+        return None
+
+    row_count = int(next((tag.value for tag in lookup_tags if tag.code == 92), 0))
+    column_count = int(next((tag.value for tag in lookup_tags if tag.code == 93), 0))
+    raw_values: list[str] = []
+    bindings: list[DynamicBlockLookupActionBinding] = []
+    index = 0
+    while index < len(lookup_tags):
+        code = lookup_tags[index].code
+        if code == 301:
+            index += 1
+            while index < len(lookup_tags) and lookup_tags[index].code == 302:
+                raw_values.append(str(lookup_tags[index].value))
+                index += 1
+            continue
+        if code == 303:
+            group_label = str(lookup_tags[index].value)
+            index += 1
+            binding_tags = []
+            while index < len(lookup_tags) and lookup_tags[index].code not in (303, 280):
+                binding_tags.append(lookup_tags[index])
+                index += 1
+            bindings.append(
+                DynamicBlockLookupActionBinding(
+                    group_label=group_label,
+                    expr_id=int(next((tag.value for tag in binding_tags if tag.code == 94), -1)),
+                    value_code=int(next((tag.value for tag in binding_tags if tag.code == 95), -1)),
+                    value_type=int(next((tag.value for tag in binding_tags if tag.code == 96), -1)),
+                    flag282=int(next((tag.value for tag in binding_tags if tag.code == 282), -1)),
+                    display_name=str(next((tag.value for tag in binding_tags if tag.code == 305), "")),
+                    flag281=int(next((tag.value for tag in binding_tags if tag.code == 281), -1)),
+                    property_name=str(next((tag.value for tag in binding_tags if tag.code == 304), "")),
+                )
+            )
+            continue
+        if code == 280:
+            break
+        index += 1
+
+    if column_count > 0:
+        entries = tuple(
+            tuple(raw_values[row * column_count : (row + 1) * column_count])
+            for row in range(max(row_count, len(raw_values) // column_count))
+            if raw_values[row * column_count : (row + 1) * column_count]
+        )
+    else:
+        entries = ()
+    return DynamicBlockLookupAction(
+        handle=entity.dxf.handle or "",
+        label=str(element_tags.get_first_value(300, "")),
+        action_location=_point3d(action_location),
+        expr_id=_eval_expr_id(entity),
+        row_count=row_count,
+        column_count=column_count,
+        entries=entries,
+        bindings=tuple(bindings),
+        enabled=int(next((tag.value for tag in reversed(lookup_tags) if tag.code == 280), 0)),
     )
 
 
@@ -976,6 +1187,63 @@ def get_dynamic_block_linear_parameters(
         parameter = _parse_linear_parameter(entity, grips_by_expr)
         if parameter is not None:
             result.append(parameter)
+    return tuple(result)
+
+
+def get_dynamic_block_lookup_grips(
+    source: Union[Insert, BlockLayout, BlockRecord], doc: Optional[Drawing] = None
+) -> tuple[DynamicBlockLookupGrip, ...]:
+    components = {
+        component_expr_id: parameter_expr_id
+        for entity in _get_dynamic_graph_owned_objects(source, doc)
+        for component in [_parse_grip_component(entity)]
+        if component is not None
+        for component_expr_id, parameter_expr_id, _label in [component]
+    }
+    result: list[DynamicBlockLookupGrip] = []
+    for entity in _get_dynamic_graph_owned_objects(source, doc):
+        grip = _parse_lookup_grip(entity)
+        if grip is None:
+            continue
+        parameter_expr_id = components.get(grip.x_expr_id, components.get(grip.y_expr_id, -1))
+        result.append(
+            DynamicBlockLookupGrip(
+                handle=grip.handle,
+                label=grip.label,
+                location=grip.location,
+                expr_id=grip.expr_id,
+                x_expr_id=grip.x_expr_id,
+                y_expr_id=grip.y_expr_id,
+                parameter_expr_id=parameter_expr_id,
+            )
+        )
+    return tuple(result)
+
+
+def get_dynamic_block_lookup_parameters(
+    source: Union[Insert, BlockLayout, BlockRecord], doc: Optional[Drawing] = None
+) -> tuple[DynamicBlockLookupParameter, ...]:
+    grips_by_param_expr = {
+        grip.parameter_expr_id: grip
+        for grip in get_dynamic_block_lookup_grips(source, doc)
+        if grip.parameter_expr_id >= 0
+    }
+    result: list[DynamicBlockLookupParameter] = []
+    for entity in _get_dynamic_graph_owned_objects(source, doc):
+        parameter = _parse_lookup_parameter(entity, grips_by_param_expr)
+        if parameter is not None:
+            result.append(parameter)
+    return tuple(result)
+
+
+def get_dynamic_block_lookup_actions(
+    source: Union[Insert, BlockLayout, BlockRecord], doc: Optional[Drawing] = None
+) -> tuple[DynamicBlockLookupAction, ...]:
+    result: list[DynamicBlockLookupAction] = []
+    for entity in _get_dynamic_graph_owned_objects(source, doc):
+        action = _parse_lookup_action(entity)
+        if action is not None:
+            result.append(action)
     return tuple(result)
 
 
@@ -1897,6 +2165,401 @@ def _build_linear_eval_graph_subclass() -> list[tuple[int, Any]]:
     ]
 
 
+def _build_lookup_eval_graph_subclass() -> list[tuple[int, Any]]:
+    return [
+        (100, "AcDbEvalGraph"),
+        (96, 75),
+        (97, 75),
+        (91, 0),
+        (93, 32),
+        (95, 6),
+        (360, "0"),
+        (92, 3),
+        (92, 3),
+        (92, 4),
+        (92, 4),
+        (91, 1),
+        (93, 32),
+        (95, 16),
+        (360, "0"),
+        (92, -1),
+        (92, -1),
+        (92, -1),
+        (92, -1),
+        (91, 2),
+        (93, 32),
+        (95, 32),
+        (360, "0"),
+        (92, 0),
+        (92, 4),
+        (92, 1),
+        (92, 3),
+        (91, 3),
+        (93, 32),
+        (95, 33),
+        (360, "0"),
+        (92, -1),
+        (92, -1),
+        (92, 0),
+        (92, 0),
+        (91, 4),
+        (93, 32),
+        (95, 34),
+        (360, "0"),
+        (92, 1),
+        (92, 1),
+        (92, -1),
+        (92, -1),
+        (91, 5),
+        (93, 32),
+        (95, 35),
+        (360, "0"),
+        (92, 2),
+        (92, 2),
+        (92, -1),
+        (92, -1),
+        (91, 6),
+        (93, 32),
+        (95, 45),
+        (360, "0"),
+        (92, 7),
+        (92, 17),
+        (92, 5),
+        (92, 16),
+        (91, 7),
+        (93, 32),
+        (95, 46),
+        (360, "0"),
+        (92, -1),
+        (92, -1),
+        (92, 7),
+        (92, 7),
+        (91, 8),
+        (93, 32),
+        (95, 47),
+        (360, "0"),
+        (92, 5),
+        (92, 5),
+        (92, -1),
+        (92, -1),
+        (91, 9),
+        (93, 32),
+        (95, 48),
+        (360, "0"),
+        (92, 6),
+        (92, 6),
+        (92, -1),
+        (92, -1),
+        (91, 10),
+        (93, 32),
+        (95, 49),
+        (360, "0"),
+        (92, -1),
+        (92, -1),
+        (92, 10),
+        (92, 10),
+        (91, 11),
+        (93, 32),
+        (95, 50),
+        (360, "0"),
+        (92, 8),
+        (92, 8),
+        (92, -1),
+        (92, -1),
+        (91, 12),
+        (93, 32),
+        (95, 51),
+        (360, "0"),
+        (92, 9),
+        (92, 9),
+        (92, -1),
+        (92, -1),
+        (91, 13),
+        (93, 32),
+        (95, 52),
+        (360, "0"),
+        (92, 11),
+        (92, 11),
+        (92, -1),
+        (92, -1),
+        (91, 14),
+        (93, 32),
+        (95, 57),
+        (360, "0"),
+        (92, 12),
+        (92, 12),
+        (92, -1),
+        (92, -1),
+        (91, 15),
+        (93, 32),
+        (95, 71),
+        (360, "0"),
+        (92, 13),
+        (92, 18),
+        (92, 14),
+        (92, 19),
+        (91, 16),
+        (93, 32),
+        (95, 72),
+        (360, "0"),
+        (92, -1),
+        (92, -1),
+        (92, 13),
+        (92, 13),
+        (91, 17),
+        (93, 32),
+        (95, 73),
+        (360, "0"),
+        (92, 14),
+        (92, 14),
+        (92, -1),
+        (92, -1),
+        (91, 18),
+        (93, 32),
+        (95, 74),
+        (360, "0"),
+        (92, 15),
+        (92, 15),
+        (92, -1),
+        (92, -1),
+        (91, 19),
+        (93, 32),
+        (95, 75),
+        (360, "0"),
+        (92, 16),
+        (92, 19),
+        (92, 17),
+        (92, 18),
+        (92, 0),
+        (93, 0),
+        (94, 1),
+        (91, 3),
+        (91, 2),
+        (92, -1),
+        (92, 4),
+        (92, -1),
+        (92, -1),
+        (92, -1),
+        (92, 1),
+        (93, 0),
+        (94, 1),
+        (91, 2),
+        (91, 4),
+        (92, -1),
+        (92, -1),
+        (92, -1),
+        (92, 2),
+        (92, -1),
+        (92, 2),
+        (93, 0),
+        (94, 1),
+        (91, 2),
+        (91, 5),
+        (92, -1),
+        (92, -1),
+        (92, 1),
+        (92, 3),
+        (92, -1),
+        (92, 3),
+        (93, 4),
+        (94, 1),
+        (91, 2),
+        (91, 0),
+        (92, -1),
+        (92, -1),
+        (92, 2),
+        (92, -1),
+        (92, 4),
+        (92, 4),
+        (93, 4),
+        (94, 1),
+        (91, 0),
+        (91, 2),
+        (92, 0),
+        (92, -1),
+        (92, -1),
+        (92, -1),
+        (92, 3),
+        (92, 5),
+        (93, 0),
+        (94, 1),
+        (91, 6),
+        (91, 8),
+        (92, -1),
+        (92, -1),
+        (92, -1),
+        (92, 6),
+        (92, -1),
+        (92, 6),
+        (93, 0),
+        (94, 1),
+        (91, 6),
+        (91, 9),
+        (92, -1),
+        (92, -1),
+        (92, 5),
+        (92, 8),
+        (92, -1),
+        (92, 7),
+        (93, 0),
+        (94, 2),
+        (91, 7),
+        (91, 6),
+        (92, -1),
+        (92, 10),
+        (92, -1),
+        (92, -1),
+        (92, -1),
+        (92, 8),
+        (93, 0),
+        (94, 1),
+        (91, 6),
+        (91, 11),
+        (92, -1),
+        (92, -1),
+        (92, 6),
+        (92, 9),
+        (92, -1),
+        (92, 9),
+        (93, 0),
+        (94, 1),
+        (91, 6),
+        (91, 12),
+        (92, -1),
+        (92, -1),
+        (92, 8),
+        (92, 11),
+        (92, -1),
+        (92, 10),
+        (93, 0),
+        (94, 2),
+        (91, 10),
+        (91, 6),
+        (92, 7),
+        (92, 17),
+        (92, -1),
+        (92, -1),
+        (92, -1),
+        (92, 11),
+        (93, 0),
+        (94, 2),
+        (91, 6),
+        (91, 13),
+        (92, -1),
+        (92, -1),
+        (92, 9),
+        (92, 12),
+        (92, -1),
+        (92, 12),
+        (93, 0),
+        (94, 1),
+        (91, 6),
+        (91, 14),
+        (92, -1),
+        (92, -1),
+        (92, 11),
+        (92, 16),
+        (92, -1),
+        (92, 13),
+        (93, 0),
+        (94, 1),
+        (91, 16),
+        (91, 15),
+        (92, -1),
+        (92, 18),
+        (92, -1),
+        (92, -1),
+        (92, -1),
+        (92, 14),
+        (93, 0),
+        (94, 1),
+        (91, 15),
+        (91, 17),
+        (92, -1),
+        (92, -1),
+        (92, -1),
+        (92, 15),
+        (92, -1),
+        (92, 15),
+        (93, 0),
+        (94, 1),
+        (91, 15),
+        (91, 18),
+        (92, -1),
+        (92, -1),
+        (92, 14),
+        (92, 19),
+        (92, -1),
+        (92, 16),
+        (93, 4),
+        (94, 1),
+        (91, 6),
+        (91, 19),
+        (92, -1),
+        (92, 19),
+        (92, 12),
+        (92, -1),
+        (92, 17),
+        (92, 17),
+        (93, 4),
+        (94, 1),
+        (91, 19),
+        (91, 6),
+        (92, 10),
+        (92, -1),
+        (92, -1),
+        (92, 18),
+        (92, 16),
+        (92, 18),
+        (93, 4),
+        (94, 1),
+        (91, 19),
+        (91, 15),
+        (92, 13),
+        (92, -1),
+        (92, 17),
+        (92, -1),
+        (92, 19),
+        (92, 19),
+        (93, 4),
+        (94, 1),
+        (91, 15),
+        (91, 19),
+        (92, 16),
+        (92, -1),
+        (92, 15),
+        (92, -1),
+        (92, 18),
+    ]
+
+
+def _build_lookup_action_subclass(action: DynamicBlockLookupAction) -> list[tuple[int, Any]]:
+    tags: list[tuple[int, Any]] = [
+        (100, "AcDbBlockLookupAction"),
+        (92, action.row_count),
+        (93, action.column_count),
+        (301, ""),
+    ]
+    for row in action.entries:
+        for value in row:
+            tags.append((302, value))
+    for binding in action.bindings:
+        tags.extend(
+            [
+                (303, binding.group_label),
+                (94, binding.expr_id),
+                (95, binding.value_code),
+                (96, binding.value_type),
+                (282, binding.flag282),
+                (305, binding.display_name),
+                (281, binding.flag281),
+                (304, binding.property_name),
+            ]
+        )
+    tags.append((280, action.enabled))
+    return tags
+
+
 def set_dynamic_block_properties_table(
     block: BlockLayout,
     table: DynamicBlockPropertiesTable,
@@ -2254,6 +2917,9 @@ def set_dynamic_block_linear_parameter(
     )
     base_grip_label = parameter.base_grip_label or "Base Grip"
     end_grip_label = parameter.end_grip_label or "End Grip"
+    allowed_values = parameter.allowed_values
+    value_count = parameter.value_count or len(allowed_values)
+    value_set_type = parameter.value_set_type or 1
 
     linear_entity = _new_tag_storage_object(
         doc,
@@ -2292,11 +2958,12 @@ def set_dynamic_block_linear_parameter(
                 (306, parameter.description),
                 (140, parameter.distance),
                 (307, ""),
-                (96, 1),
+                (96, value_set_type),
                 (141, 0.0),
                 (142, 0.0),
                 (143, 0.0),
-                (175, 0),
+                (175, value_count),
+                *[(144, value) for value in allowed_values],
             ],
         ],
     )
@@ -2446,6 +3113,217 @@ def set_dynamic_block_linear_parameter(
         end_grip_handle=end_grip.dxf.handle or "",
         base_grip_label=base_grip_label,
         end_grip_label=end_grip_label,
+        value_set_type=value_set_type,
+        value_count=value_count,
+        allowed_values=allowed_values,
+    )
+
+
+def set_dynamic_block_lookup_parameter(
+    block: BlockLayout,
+    parameter: DynamicBlockLookupParameter,
+    actions: Sequence[DynamicBlockLookupAction],
+) -> DynamicBlockLookupParameter:
+    doc = block.doc
+    if doc is None:
+        raise const.DXFStructureError("valid DXF document required")
+    if get_dynamic_block_lookup_parameters(block):
+        raise const.DXFValueError("multiple dynamic block lookup parameters are not supported")
+    visibility = get_dynamic_block_visibility_parameter(block)
+    properties = get_dynamic_block_properties_table(block)
+    linear_parameters = get_dynamic_block_linear_parameters(block)
+    stretch_actions = get_dynamic_block_stretch_actions(block)
+    if visibility is None or properties is None:
+        raise const.DXFValueError("dynamic block requires visibility and properties table")
+    if len(linear_parameters) != 1 or len(stretch_actions) != 1:
+        raise const.DXFValueError("dynamic block requires exactly one linear parameter and stretch action")
+    if len(actions) != 2:
+        raise const.DXFValueError("dynamic block lookup parameter requires exactly two lookup actions")
+    graph = _get_enhanced_block_graph(block.block_record)
+    if graph is None:
+        raise const.DXFStructureError("dynamic block graph not found")
+
+    public_action = next((action for action in actions if action.expr_id == parameter.action_expr_id), None)
+    if public_action is None:
+        public_action = max(actions, key=lambda action: (action.column_count, action.expr_id))
+    helper_actions = [action for action in actions if action is not public_action]
+    if len(helper_actions) != 1:
+        raise const.DXFValueError("dynamic block lookup parameter requires one helper action and one public action")
+    helper_action = helper_actions[0]
+
+    owned = tuple(_iter_graph_owned_objects(graph))
+    visibility_entity = next((entity for entity in owned if entity.dxftype() == "BLOCKVISIBILITYPARAMETER"), None)
+    table_entity = next((entity for entity in owned if entity.dxftype() == "BLOCKPROPERTIESTABLE"), None)
+    proxy = next((entity for entity in owned if entity.dxftype() == "ACDB_DYNAMICBLOCKPROXYNODE"), None)
+    table_grip = next((entity for entity in owned if entity.dxftype() == "BLOCKPROPERTIESTABLEGRIP"), None)
+    linear_entity = next((entity for entity in owned if entity.dxftype() == "BLOCKLINEARPARAMETER"), None)
+    end_grip = next((entity for entity in owned if entity.dxftype() == "BLOCKLINEARGRIP" and entity.xtags.get_subclass("AcDbBlockElement").get_first_value(300, "") == linear_parameters[0].end_grip_label), None)
+    base_grip = next((entity for entity in owned if entity.dxftype() == "BLOCKLINEARGRIP" and entity.xtags.get_subclass("AcDbBlockElement").get_first_value(300, "") == linear_parameters[0].base_grip_label), None)
+    stretch_entity = next((entity for entity in owned if entity.dxftype() == "BLOCKSTRETCHACTION"), None)
+    property_components = [entity for entity in owned if entity.dxftype() == "BLOCKGRIPLOCATIONCOMPONENT"]
+    if not all(isinstance(entity, DXFTagStorage) for entity in (visibility_entity, table_entity, proxy, table_grip, linear_entity, end_grip, base_grip, stretch_entity)):
+        raise const.DXFStructureError("dynamic block graph is missing required linear/property objects")
+    x_comp = next((entity for entity in property_components if entity.xtags.get_subclass("AcDbBlockGripExpr").get_first_value(300, "") == "UpdatedX"), None)
+    y_comp = next((entity for entity in property_components if entity.xtags.get_subclass("AcDbBlockGripExpr").get_first_value(300, "") == "UpdatedY"), None)
+    end_x = next((entity for entity in property_components if entity.xtags.get_subclass("AcDbBlockGripExpr").get_first_value(300, "") == "UpdatedEndX"), None)
+    end_y = next((entity for entity in property_components if entity.xtags.get_subclass("AcDbBlockGripExpr").get_first_value(300, "") == "UpdatedEndY"), None)
+    base_x = next((entity for entity in property_components if entity.xtags.get_subclass("AcDbBlockGripExpr").get_first_value(300, "") == "UpdatedBaseX"), None)
+    base_y = next((entity for entity in property_components if entity.xtags.get_subclass("AcDbBlockGripExpr").get_first_value(300, "") == "UpdatedBaseY"), None)
+    if not all(isinstance(entity, DXFTagStorage) for entity in (x_comp, y_comp, end_x, end_y, base_x, base_y)):
+        raise const.DXFStructureError("dynamic block graph is missing required grip components")
+
+    linear_parameter = linear_parameters[0]
+    allowed_values = linear_parameter.allowed_values
+    if not allowed_values and public_action.entries:
+        values: list[float] = []
+        for row in public_action.entries:
+            if not row:
+                continue
+            try:
+                values.append(float(row[0]))
+            except ValueError:
+                continue
+        allowed_values = tuple(values)
+    if not allowed_values:
+        raise const.DXFValueError("dynamic block lookup parameter requires linear allowed values")
+    linear_tags = [
+        (100, "AcDbBlockLinearParameter"),
+        (305, linear_parameter.parameter_name),
+        (306, linear_parameter.description),
+        (140, linear_parameter.distance),
+        (307, ""),
+        (96, 8),
+        (141, 0.0),
+        (142, 0.0),
+        (143, 0.0),
+        (175, len(allowed_values)),
+        *[(144, value) for value in allowed_values],
+    ]
+    _replace_subclass_tags(linear_entity.xtags.get_subclass("AcDbBlockLinearParameter"), linear_tags)
+
+    helper_action_entity = _new_tag_storage_object(
+        doc,
+        "BLOCKLOOKUPACTION",
+        graph.dxf.handle,
+        [
+            [(100, "AcDbEvalExpr"), (90, 57), (98, 33), (99, 378)],
+            [(100, "AcDbBlockElement"), (300, helper_action.label), (98, 33), (99, 378), (1071, 2)],
+            [(100, "AcDbBlockAction"), (70, 0), (71, 0), (1010, helper_action.action_location)],
+            _build_lookup_action_subclass(helper_action),
+        ],
+    )
+    lookup_parameter_entity = _new_tag_storage_object(
+        doc,
+        "BLOCKLOOKUPPARAMETER",
+        graph.dxf.handle,
+        [
+            [(100, "AcDbEvalExpr"), (90, 71), (98, 33), (99, 378)],
+            [(100, "AcDbBlockElement"), (300, parameter.label), (98, 33), (99, 378), (1071, 0)],
+            [(100, "AcDbBlockParameter"), (280, 1), (281, 0)],
+            [(100, "AcDbBlock1PtParameter"), (1010, parameter.location), (93, 72), (170, 0), (171, 0)],
+            [(100, "AcDbBlockLookUpParameter"), (303, parameter.parameter_name), (304, parameter.description), (94, 75)],
+        ],
+    )
+    lookup_grip = _new_tag_storage_object(
+        doc,
+        "BLOCKLOOKUPGRIP",
+        graph.dxf.handle,
+        [
+            [(100, "AcDbEvalExpr"), (90, 72), (98, 33), (99, 378)],
+            [(100, "AcDbBlockElement"), (300, parameter.grip_label or "Grip"), (98, 33), (99, 378), (1071, 0)],
+            [(100, "AcDbBlockGrip"), (91, 73), (92, 74), (1010, parameter.location), (280, 0), (93, -1)],
+            [(100, "AcDbBlockLookUpGrip")],
+        ],
+    )
+    lookup_x = _new_tag_storage_object(
+        doc,
+        "BLOCKGRIPLOCATIONCOMPONENT",
+        graph.dxf.handle,
+        [
+            [(100, "AcDbEvalExpr"), (90, 73), (98, 33), (99, 378), (1, ""), (70, 40), (140, 0.0)],
+            [(100, "AcDbBlockGripExpr"), (91, 71), (300, "UpdatedX")],
+        ],
+    )
+    lookup_y = _new_tag_storage_object(
+        doc,
+        "BLOCKGRIPLOCATIONCOMPONENT",
+        graph.dxf.handle,
+        [
+            [(100, "AcDbEvalExpr"), (90, 74), (98, 33), (99, 378), (1, ""), (70, 40), (140, 0.0)],
+            [(100, "AcDbBlockGripExpr"), (91, 71), (300, "UpdatedY")],
+        ],
+    )
+    public_action_entity = _new_tag_storage_object(
+        doc,
+        "BLOCKLOOKUPACTION",
+        graph.dxf.handle,
+        [
+            [(100, "AcDbEvalExpr"), (90, 75), (98, 33), (99, 378)],
+            [(100, "AcDbBlockElement"), (300, public_action.label), (98, 33), (99, 378), (1071, 0)],
+            [(100, "AcDbBlockAction"), (70, 0), (71, 0), (1010, public_action.action_location)],
+            _build_lookup_action_subclass(public_action),
+        ],
+    )
+
+    _replace_subclass_tags(
+        visibility_entity.xtags.get_subclass("AcDbBlockVisibilityParameter"),
+        _build_property_visibility_parameter_subclass(
+            visibility,
+            table_entity.dxf.handle,
+            table_grip.dxf.handle,
+            extra_state_refs=(
+                (
+                    base_grip.dxf.handle,
+                    linear_entity.dxf.handle,
+                    end_grip.dxf.handle,
+                    stretch_entity.dxf.handle,
+                    helper_action_entity.dxf.handle,
+                    lookup_parameter_entity.dxf.handle,
+                    lookup_grip.dxf.handle,
+                    public_action_entity.dxf.handle,
+                ),
+                (lookup_grip.dxf.handle, lookup_parameter_entity.dxf.handle),
+                (lookup_parameter_entity.dxf.handle,),
+            ),
+            all_handles=visibility.all_entity_handles,
+        ),
+    )
+    _replace_subclass_tags(graph.xtags.get_subclass("AcDbEvalGraph"), _build_lookup_eval_graph_subclass())
+    _patch_eval_graph_handles(
+        graph,
+        [
+            visibility_entity.dxf.handle,
+            proxy.dxf.handle,
+            table_entity.dxf.handle,
+            table_grip.dxf.handle,
+            x_comp.dxf.handle,
+            y_comp.dxf.handle,
+            linear_entity.dxf.handle,
+            end_grip.dxf.handle,
+            end_x.dxf.handle,
+            end_y.dxf.handle,
+            base_grip.dxf.handle,
+            base_x.dxf.handle,
+            base_y.dxf.handle,
+            stretch_entity.dxf.handle,
+            helper_action_entity.dxf.handle,
+            lookup_parameter_entity.dxf.handle,
+            lookup_grip.dxf.handle,
+            lookup_x.dxf.handle,
+            lookup_y.dxf.handle,
+            public_action_entity.dxf.handle,
+        ],
+    )
+    return DynamicBlockLookupParameter(
+        handle=lookup_parameter_entity.dxf.handle or "",
+        label=parameter.label,
+        parameter_name=parameter.parameter_name,
+        description=parameter.description,
+        location=parameter.location,
+        expr_id=71,
+        action_expr_id=75,
+        grip_handle=lookup_grip.dxf.handle or "",
+        grip_label=parameter.grip_label or "Grip",
     )
 
 
@@ -2476,6 +3354,7 @@ def set_dynamic_block_properties_editor_support(
     visible_state_name = visibility.states[0].name if visibility.states else ""
     state_names = [state.name for state in visibility.states]
     linear_parameters = get_dynamic_block_linear_parameters(block)
+    lookup_parameters = get_dynamic_block_lookup_parameters(block)
 
     def add_hidden_representation(
         *,
@@ -2572,6 +3451,134 @@ def set_dynamic_block_properties_editor_support(
 
     def use_linear_golden_style_templates() -> bool:
         return use_golden_style_templates() and len(linear_parameters) == 1
+
+    def use_lookup_golden_style_templates() -> bool:
+        return use_linear_golden_style_templates() and len(lookup_parameters) == 1
+
+    if use_lookup_golden_style_templates():
+        pair = (0, 1)
+        triple_heads = (0, 1)
+        triple_all = (0, 1, 2)
+
+        for _ in range(2):
+            add_hidden_representation(state_name=None, carrier_count=0, carrier_text="", carriers_visible=True)
+        for state_name in state_names:
+            add_hidden_representation(state_name=state_name, carrier_count=0, carrier_text="", carriers_visible=True)
+
+        for _ in range(8):
+            add_hidden_representation(
+                state_name=visible_state_name,
+                carrier_count=2,
+                carrier_text="",
+                carriers_visible=True,
+                carrier_metadata_indices=(),
+                carrier_reactor_indices=pair,
+            )
+        for _ in range(25):
+            add_hidden_representation(
+                state_name=state_names[1],
+                carrier_count=2,
+                carrier_text="",
+                carriers_visible=False,
+                carrier_metadata_indices=(),
+                carrier_reactor_indices=pair,
+            )
+        for _ in range(23):
+            add_hidden_representation(
+                state_name=state_names[2],
+                carrier_count=2,
+                carrier_text="",
+                carriers_visible=False,
+                carrier_metadata_indices=(),
+                carrier_reactor_indices=pair,
+            )
+
+        for _ in range(1):
+            add_hidden_representation(
+                state_name=state_names[1],
+                carrier_count=3,
+                carrier_text="",
+                carriers_visible=False,
+                carrier_metadata_indices=triple_heads,
+                carrier_reactor_indices=triple_all,
+            )
+        for _ in range(3):
+            add_hidden_representation(
+                state_name=state_names[2],
+                carrier_count=3,
+                carrier_text="",
+                carriers_visible=False,
+                carrier_metadata_indices=triple_heads,
+                carrier_reactor_indices=triple_all,
+            )
+
+        for _ in range(1):
+            add_hidden_representation(
+                state_name=state_names[1],
+                carrier_count=3,
+                carrier_text="Block Table 1",
+                carriers_visible=False,
+                carrier_metadata_indices=triple_heads,
+                carrier_reactor_indices=triple_all,
+            )
+        for _ in range(2):
+            add_hidden_representation(
+                state_name=state_names[2],
+                carrier_count=3,
+                carrier_text="Block Table 1",
+                carriers_visible=False,
+                carrier_metadata_indices=triple_heads,
+                carrier_reactor_indices=triple_all,
+            )
+
+        for _ in range(10):
+            add_hidden_representation(
+                state_name=visible_state_name,
+                carrier_count=3,
+                carrier_text=properties.table_name,
+                carriers_visible=True,
+                carrier_metadata_indices=triple_all,
+                carrier_reactor_indices=triple_all,
+            )
+        for _ in range(6):
+            add_hidden_representation(
+                state_name=state_names[1],
+                carrier_count=3,
+                carrier_text=properties.table_name,
+                carriers_visible=True,
+                carrier_metadata_indices=triple_all,
+                carrier_reactor_indices=triple_all,
+            )
+        for _ in range(6):
+            add_hidden_representation(
+                state_name=state_names[2],
+                carrier_count=3,
+                carrier_text=properties.table_name,
+                carriers_visible=True,
+                carrier_metadata_indices=triple_all,
+                carrier_reactor_indices=triple_all,
+            )
+        for _ in range(8):
+            add_hidden_representation(
+                state_name=state_names[1],
+                carrier_count=3,
+                carrier_text=properties.table_name,
+                carriers_visible=False,
+                carrier_metadata_indices=triple_all,
+                carrier_reactor_indices=triple_all,
+            )
+        for _ in range(6):
+            add_hidden_representation(
+                state_name=state_names[2],
+                carrier_count=3,
+                carrier_text=properties.table_name,
+                carriers_visible=False,
+                carrier_metadata_indices=triple_all,
+                carrier_reactor_indices=triple_all,
+            )
+
+        _set_root_assoc_children(root_network, child_networks)
+        return tuple(created)
 
     if use_linear_golden_style_templates():
         pair = (0, 1)

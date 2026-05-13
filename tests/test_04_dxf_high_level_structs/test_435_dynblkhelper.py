@@ -9,6 +9,10 @@ from ezdxf.dynblkhelper import (
     DynamicBlockPropertyRow,
     DynamicBlockLinearGrip,
     DynamicBlockLinearParameter,
+    DynamicBlockLookupAction,
+    DynamicBlockLookupActionBinding,
+    DynamicBlockLookupGrip,
+    DynamicBlockLookupParameter,
     DynamicBlockStretchAction,
     DynamicBlockStretchActionTarget,
     DynamicBlockVisibilityParameter,
@@ -16,6 +20,9 @@ from ezdxf.dynblkhelper import (
     get_dynamic_block_definition,
     get_dynamic_block_linear_grips,
     get_dynamic_block_linear_parameters,
+    get_dynamic_block_lookup_actions,
+    get_dynamic_block_lookup_grips,
+    get_dynamic_block_lookup_parameters,
     get_dynamic_block_properties_table,
     get_dynamic_block_property_columns,
     get_dynamic_block_property_assoc_networks,
@@ -31,6 +38,7 @@ from ezdxf.dynblkhelper import (
     get_dynamic_block_visibility_state_handles,
     get_dynamic_block_visibility_states,
     set_dynamic_block_linear_parameter,
+    set_dynamic_block_lookup_parameter,
     set_dynamic_block_properties_table,
     set_dynamic_block_reference,
     set_dynamic_block_visibility_parameter,
@@ -363,6 +371,155 @@ def attach_linear_stretch_probe(block):
     )
 
     return linear, end_grip, base_grip, stretch
+
+
+def attach_lookup_probe(block):
+    doc = block.doc
+    assert doc is not None
+    graph = block.block_record.get_extension_dict().dictionary.get("ACAD_ENHANCEDBLOCK")
+    assert graph is not None
+
+    linear_entity = next(obj for obj in doc.objects if obj.dxftype() == "BLOCKLINEARPARAMETER")
+    lookup_action_internal = _new_tag_storage_object(
+        doc,
+        "BLOCKLOOKUPACTION",
+        graph.dxf.handle,
+        [
+            [(100, "AcDbEvalExpr"), (90, 57), (98, 33), (99, 378)],
+            [(100, "AcDbBlockElement"), (300, "Lookup1"), (98, 33), (99, 378), (1071, 2)],
+            [(100, "AcDbBlockAction"), (70, 0), (71, 0), (1010, (16.5, 19.5, 0.0))],
+            [
+                (100, "AcDbBlockLookupAction"),
+                (92, 5),
+                (93, 1),
+                (301, ""),
+                (302, "0"),
+                (302, "8"),
+                (302, "7"),
+                (302, "6"),
+                (302, "5"),
+                (303, ""),
+                (94, 45),
+                (95, 40),
+                (96, 2),
+                (282, 0),
+                (305, "Custom"),
+                (281, 0),
+                (304, "UpdatedDistance"),
+                (280, 1),
+            ],
+        ],
+    )
+    lookup_parameter = _new_tag_storage_object(
+        doc,
+        "BLOCKLOOKUPPARAMETER",
+        graph.dxf.handle,
+        [
+            [(100, "AcDbEvalExpr"), (90, 71), (98, 33), (99, 378)],
+            [(100, "AcDbBlockElement"), (300, "Lookup"), (98, 33), (99, 378), (1071, 0)],
+            [(100, "AcDbBlockParameter"), (280, 1), (281, 0)],
+            [(100, "AcDbBlock1PtParameter"), (1010, (19.28, 23.15, 0.0)), (93, 72), (170, 0), (171, 0)],
+            [(100, "AcDbBlockLookUpParameter"), (303, "Lookup1"), (304, ""), (94, 75)],
+        ],
+    )
+    lookup_grip = _new_tag_storage_object(
+        doc,
+        "BLOCKLOOKUPGRIP",
+        graph.dxf.handle,
+        [
+            [(100, "AcDbEvalExpr"), (90, 72), (98, 33), (99, 378)],
+            [(100, "AcDbBlockElement"), (300, "Grip"), (98, 33), (99, 378), (1071, 0)],
+            [(100, "AcDbBlockGrip"), (91, 73), (92, 74), (1010, (19.28, 23.15, 0.0)), (280, 0), (93, -1)],
+            [(100, "AcDbBlockLookUpGrip")],
+        ],
+    )
+    lookup_x = _new_tag_storage_object(
+        doc,
+        "BLOCKGRIPLOCATIONCOMPONENT",
+        graph.dxf.handle,
+        [
+            [(100, "AcDbEvalExpr"), (90, 73), (98, 33), (99, 378), (1, ""), (70, 40), (140, 0.0)],
+            [(100, "AcDbBlockGripExpr"), (91, 71), (300, "UpdatedX")],
+        ],
+    )
+    lookup_y = _new_tag_storage_object(
+        doc,
+        "BLOCKGRIPLOCATIONCOMPONENT",
+        graph.dxf.handle,
+        [
+            [(100, "AcDbEvalExpr"), (90, 74), (98, 33), (99, 378), (1, ""), (70, 40), (140, 0.0)],
+            [(100, "AcDbBlockGripExpr"), (91, 71), (300, "UpdatedY")],
+        ],
+    )
+    lookup_action_public = _new_tag_storage_object(
+        doc,
+        "BLOCKLOOKUPACTION",
+        graph.dxf.handle,
+        [
+            [(100, "AcDbEvalExpr"), (90, 75), (98, 33), (99, 378)],
+            [(100, "AcDbBlockElement"), (300, "Lookup3"), (98, 33), (99, 378), (1071, 0)],
+            [(100, "AcDbBlockAction"), (70, 0), (71, 0), (1010, (20.01, 22.42, 0.0))],
+            [
+                (100, "AcDbBlockLookupAction"),
+                (92, 5),
+                (93, 2),
+                (301, ""),
+                (302, "10"),
+                (302, "len 1"),
+                (302, "20"),
+                (302, "len 2"),
+                (302, "32"),
+                (302, "len 3"),
+                (302, "40"),
+                (302, "len 4"),
+                (302, "50"),
+                (302, "len 5"),
+                (303, ""),
+                (94, 45),
+                (95, 40),
+                (96, 2),
+                (282, 0),
+                (305, "Custom"),
+                (281, 0),
+                (304, "UpdatedDistance"),
+                (303, ""),
+                (94, 71),
+                (95, 1),
+                (96, 0),
+                (282, 1),
+                (305, "Custom"),
+                (281, 1),
+                (304, "lookupString"),
+                (280, 1),
+            ],
+        ],
+    )
+
+    linear_subclass = linear_entity.xtags.get_subclass("AcDbBlockLinearParameter")
+    linear_subclass.clear()
+    from ezdxf.lldxf.types import dxftag
+
+    linear_subclass.extend(
+        dxftag(code, value)
+        for code, value in [
+            (100, "AcDbBlockLinearParameter"),
+            (305, "Distance1"),
+            (306, ""),
+            (140, -5.441939436423126),
+            (307, ""),
+            (96, 8),
+            (141, 0.0),
+            (142, 0.0),
+            (143, 0.0),
+            (175, 5),
+            (144, 10.0),
+            (144, 20.0),
+            (144, 32.0),
+            (144, 40.0),
+            (144, 50.0),
+        ]
+    )
+    return lookup_parameter, lookup_grip, lookup_x, lookup_y, lookup_action_internal, lookup_action_public
 
 
 def test_get_dynamic_block_visibility_parameter_and_state():
@@ -869,6 +1026,96 @@ def test_get_dynamic_block_stretch_actions_reads_targets_and_selection_window():
     assert actions[0].targets[1].components == (0,)
 
 
+def test_get_dynamic_block_lookup_parameters_and_grips_reads_lookup_stack():
+    doc = ezdxf.new("R2018")
+    insert = make_dynamic_properties_insert(doc)
+    base = get_dynamic_block_definition(insert)
+
+    assert base is not None
+    attach_linear_stretch_probe(base)
+    lookup_parameter_entity, lookup_grip_entity, _, _, _, _ = attach_lookup_probe(base)
+
+    linear = get_dynamic_block_linear_parameters(base)
+    parameters = get_dynamic_block_lookup_parameters(insert)
+    grips = get_dynamic_block_lookup_grips(base)
+
+    assert len(linear) == 1
+    assert linear[0].value_set_type == 8
+    assert linear[0].value_count == 5
+    assert linear[0].allowed_values == (10.0, 20.0, 32.0, 40.0, 50.0)
+
+    assert len(parameters) == 1
+    assert isinstance(parameters[0], DynamicBlockLookupParameter)
+    assert parameters[0].handle == lookup_parameter_entity.dxf.handle
+    assert parameters[0].label == "Lookup"
+    assert parameters[0].parameter_name == "Lookup1"
+    assert parameters[0].location == (19.28, 23.15, 0.0)
+    assert parameters[0].expr_id == 71
+    assert parameters[0].action_expr_id == 75
+    assert parameters[0].grip_handle == lookup_grip_entity.dxf.handle
+    assert parameters[0].grip_label == "Grip"
+
+    assert len(grips) == 1
+    assert isinstance(grips[0], DynamicBlockLookupGrip)
+    assert grips[0].handle == lookup_grip_entity.dxf.handle
+    assert grips[0].label == "Grip"
+    assert grips[0].parameter_expr_id == 71
+    assert grips[0].x_expr_id == 73
+    assert grips[0].y_expr_id == 74
+
+
+def test_get_dynamic_block_lookup_actions_reads_entries_and_bindings():
+    doc = ezdxf.new("R2018")
+    insert = make_dynamic_properties_insert(doc)
+    base = get_dynamic_block_definition(insert)
+
+    assert base is not None
+    attach_linear_stretch_probe(base)
+    _, _, _, _, internal_action, public_action = attach_lookup_probe(base)
+
+    actions = get_dynamic_block_lookup_actions(insert)
+
+    assert len(actions) == 2
+    assert all(isinstance(action, DynamicBlockLookupAction) for action in actions)
+    action_by_handle = {action.handle: action for action in actions}
+
+    internal = action_by_handle[internal_action.dxf.handle]
+    assert internal.label == "Lookup1"
+    assert internal.expr_id == 57
+    assert internal.row_count == 5
+    assert internal.column_count == 1
+    assert internal.entries == (("0",), ("8",), ("7",), ("6",), ("5",))
+    assert len(internal.bindings) == 1
+    assert isinstance(internal.bindings[0], DynamicBlockLookupActionBinding)
+    assert internal.bindings[0].expr_id == 45
+    assert internal.bindings[0].value_code == 40
+    assert internal.bindings[0].value_type == 2
+    assert internal.bindings[0].property_name == "UpdatedDistance"
+    assert internal.enabled == 1
+
+    public = action_by_handle[public_action.dxf.handle]
+    assert public.label == "Lookup3"
+    assert public.expr_id == 75
+    assert public.row_count == 5
+    assert public.column_count == 2
+    assert public.entries == (
+        ("10", "len 1"),
+        ("20", "len 2"),
+        ("32", "len 3"),
+        ("40", "len 4"),
+        ("50", "len 5"),
+    )
+    assert len(public.bindings) == 2
+    assert public.bindings[0].expr_id == 45
+    assert public.bindings[0].property_name == "UpdatedDistance"
+    assert public.bindings[1].expr_id == 71
+    assert public.bindings[1].value_code == 1
+    assert public.bindings[1].value_type == 0
+    assert public.bindings[1].flag282 == 1
+    assert public.bindings[1].flag281 == 1
+    assert public.bindings[1].property_name == "lookupString"
+
+
 def test_set_dynamic_block_linear_parameter_patches_graph_and_visibility():
     doc = ezdxf.new("R2018")
     insert = make_dynamic_properties_insert(doc)
@@ -1055,3 +1302,141 @@ def test_set_dynamic_block_linear_parameter_rejects_second_linear_parameter():
 
     with pytest.raises(ezdxf.DXFValueError):
         set_dynamic_block_linear_parameter(base, parameter, action)
+
+
+def test_set_dynamic_block_lookup_parameter_patches_graph_and_linear_values():
+    doc = ezdxf.new("R2018")
+    insert = make_dynamic_properties_insert(doc)
+    base = get_dynamic_block_definition(insert)
+
+    assert base is not None
+    entities = list(base)
+    stretch_entity = entities[0]
+    attdef1 = next(entity for entity in entities if entity.dxftype() == "ATTDEF" and entity.dxf.tag == "PARAM_1")
+    attdef2 = next(entity for entity in entities if entity.dxftype() == "ATTDEF" and entity.dxf.tag == "PARAM_2")
+    attdef3 = next(entity for entity in entities if entity.dxftype() == "ATTDEF" and entity.dxf.tag == "PARAM_3")
+    table = get_dynamic_block_properties_table(base)
+    grip = next(obj for obj in doc.objects if obj.dxftype() == "BLOCKPROPERTIESTABLEGRIP")
+
+    assert table is not None
+    linear = DynamicBlockLinearParameter(
+        handle="",
+        label="Linear",
+        parameter_name="Distance1",
+        description="",
+        base_point=(0.0, 0.0, 0.0),
+        end_point=(1.0, 0.0, 0.0),
+        distance=1.0,
+        expr_id=0,
+        base_grip_label="Base Grip",
+        end_grip_label="End Grip",
+    )
+    stretch = DynamicBlockStretchAction(
+        handle="",
+        label="Stretch1",
+        action_location=(1.0, -0.5, 0.0),
+        x_expr_id=0,
+        x_name="EndXDelta",
+        y_expr_id=0,
+        y_name="EndYDelta",
+        selection_window=((2.0, 1.0, 0.0), (0.5, -0.5, 0.0)),
+        dependency_handles=(
+            grip.dxf.handle,
+            table.handle,
+            attdef3.dxf.handle,
+            attdef2.dxf.handle,
+            attdef1.dxf.handle,
+            stretch_entity.dxf.handle,
+        ),
+        targets=(
+            DynamicBlockStretchActionTarget(stretch_entity.dxf.handle, 2, (1, 2)),
+            DynamicBlockStretchActionTarget(attdef1.dxf.handle, 1, (0,)),
+            DynamicBlockStretchActionTarget(attdef2.dxf.handle, 1, (0,)),
+            DynamicBlockStretchActionTarget(attdef3.dxf.handle, 1, (0,)),
+        ),
+    )
+    set_dynamic_block_linear_parameter(base, linear, stretch)
+
+    lookup = DynamicBlockLookupParameter(
+        handle="",
+        label="Lookup",
+        parameter_name="Lookup1",
+        description="",
+        location=(19.28, 23.15, 0.0),
+        expr_id=0,
+        action_expr_id=75,
+        grip_label="Grip",
+    )
+    helper_action = DynamicBlockLookupAction(
+        handle="",
+        label="Lookup1",
+        action_location=(16.5, 19.5, 0.0),
+        expr_id=57,
+        row_count=5,
+        column_count=1,
+        entries=(("0",), ("8",), ("7",), ("6",), ("5",)),
+        bindings=(
+            DynamicBlockLookupActionBinding(
+                group_label="",
+                expr_id=45,
+                value_code=40,
+                value_type=2,
+                flag282=0,
+                display_name="Custom",
+                flag281=0,
+                property_name="UpdatedDistance",
+            ),
+        ),
+        enabled=1,
+    )
+    public_action = DynamicBlockLookupAction(
+        handle="",
+        label="Lookup3",
+        action_location=(20.01, 22.42, 0.0),
+        expr_id=75,
+        row_count=5,
+        column_count=2,
+        entries=(("10", "len 1"), ("20", "len 2"), ("32", "len 3"), ("40", "len 4"), ("50", "len 5")),
+        bindings=(
+            DynamicBlockLookupActionBinding(
+                group_label="",
+                expr_id=45,
+                value_code=40,
+                value_type=2,
+                flag282=0,
+                display_name="Custom",
+                flag281=0,
+                property_name="UpdatedDistance",
+            ),
+            DynamicBlockLookupActionBinding(
+                group_label="",
+                expr_id=71,
+                value_code=1,
+                value_type=0,
+                flag282=1,
+                display_name="Custom",
+                flag281=1,
+                property_name="lookupString",
+            ),
+        ),
+        enabled=1,
+    )
+
+    created = set_dynamic_block_lookup_parameter(base, lookup, (helper_action, public_action))
+    linear_after = get_dynamic_block_linear_parameters(base)
+    lookup_parameters = get_dynamic_block_lookup_parameters(base)
+    lookup_grips = get_dynamic_block_lookup_grips(base)
+    lookup_actions = get_dynamic_block_lookup_actions(base)
+
+    assert created.handle
+    assert len(linear_after) == 1
+    assert linear_after[0].value_set_type == 8
+    assert linear_after[0].value_count == 5
+    assert linear_after[0].allowed_values == (10.0, 20.0, 32.0, 40.0, 50.0)
+    assert len(lookup_parameters) == 1
+    assert lookup_parameters[0].handle == created.handle
+    assert lookup_parameters[0].parameter_name == "Lookup1"
+    assert len(lookup_grips) == 1
+    assert lookup_grips[0].parameter_expr_id == 71
+    assert len(lookup_actions) == 2
+    assert {action.label for action in lookup_actions} == {"Lookup1", "Lookup3"}
