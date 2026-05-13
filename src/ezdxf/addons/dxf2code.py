@@ -7,7 +7,7 @@ import json
 from ezdxf.sections.tables import TABLENAMES
 from ezdxf.lldxf import const
 from ezdxf.lldxf.tags import Tags
-from ezdxf.entities import BoundaryPathType, EdgeType
+from ezdxf.entities import BoundaryPathType, EdgeType, Dictionary, XRecord
 from ezdxf.render.arrows import ARROWS
 import numpy as np
 
@@ -499,6 +499,13 @@ class _SourceCodeGenerator:
         return ""
 
     @staticmethod
+    def _attdef_rep_index(entity) -> Optional[int]:
+        try:
+            return int(entity.get_xdata("AcDbBlockRepETag").get_first_value(1071, -1))
+        except const.DXFValueError:
+            return None
+
+    @staticmethod
     def _field_has_eval_option(field) -> bool:
         return any(
             tag.code == 6 and tag.value == "ACAD_ROUNDTRIP_2008_FIELD_EVALOPTION"
@@ -799,7 +806,7 @@ class _SourceCodeGenerator:
                 self.add_source_code_line("    rows=_dyn_property_rows,")
                 self.add_source_code_line(")")
                 self.add_source_code_line("_dyn_props = set_dynamic_block_properties_table(b, _dyn_props)")
-            if properties_table is not None and base_point_parameter is not None:
+            if base_point_parameter is not None:
                 self.add_import_statement(
                     "from ezdxf.dynblkhelper import DynamicBlockBasePointParameter, set_dynamic_block_base_point_parameter"
                 )
@@ -1018,6 +1025,21 @@ class _SourceCodeGenerator:
         self.add_source_code_line(
             f"set_dynamic_block_reference(b, {self.doc}.blocks.get({json.dumps(base_block.name)}), clone_property_attdefs=False, normalize_entities=False)"
         )
+        if any(child.dxftype() == "ATTDEF" and child.get_reactors() for child in block):
+            self.add_import_statement(
+                "from ezdxf.dynblkhelper import get_dynamic_block_properties_table"
+            )
+            self.add_source_code_line(
+                f"_base = {self.doc}.blocks.get({json.dumps(base_block.name)})"
+            )
+            self.add_source_code_line("_props = get_dynamic_block_properties_table(_base)")
+            self.add_source_code_line("if _props is not None:")
+            self.add_source_code_line(
+                "    for _attdef in (entity for entity in b if entity.dxftype() == 'ATTDEF'):"
+            )
+            self.add_source_code_line(
+                "        _attdef.set_reactors([_props.handle])"
+            )
 
     def _schedule_dynamic_block_insert_state(self, entity: Insert) -> None:
         from ezdxf.dynblkhelper import (
@@ -1030,20 +1052,70 @@ class _SourceCodeGenerator:
         if base_block is None:
             return
         parameter = get_dynamic_block_visibility_parameter(entity)
+        handle = entity.dxf.get("handle")
+        if not handle:
+            return
+        cache_records = self._dynamic_insert_cache_records(entity)
         if parameter is None:
+            if entity.has_extension_dict:
+                self.add_import_statement(
+                    "from ezdxf.dynblkhelper import set_dynamic_block_insert_cache"
+                )
+                self.add_deferred_source_code_line(
+                    f"set_dynamic_block_insert_cache(_entity_map[{json.dumps(handle)}], {self.doc}.blocks.get({json.dumps(base_block.name)}), location={self._format_python_value(tuple(entity.dxf.insert))}, update_cache={not bool(cache_records)})"
+                )
+                self._emit_dynamic_insert_cache_records(cache_records, handle, base_block.name)
             return
         state = get_dynamic_block_visibility_state(entity)
         if not state:
-            return
-        handle = entity.dxf.get("handle")
-        if not handle:
             return
         self.add_import_statement(
             "from ezdxf.dynblkhelper import set_dynamic_block_visibility_state"
         )
         self.add_deferred_source_code_line(
-            f"set_dynamic_block_visibility_state(_entity_map[{json.dumps(handle)}], {self.doc}.blocks.get({json.dumps(base_block.name)}), state={json.dumps(state)}, location={self._format_python_value(parameter.location)})"
+            f"set_dynamic_block_visibility_state(_entity_map[{json.dumps(handle)}], {self.doc}.blocks.get({json.dumps(base_block.name)}), state={json.dumps(state)}, location={self._format_python_value(parameter.location)}, update_cache={not bool(cache_records)})"
         )
+        self._emit_dynamic_insert_cache_records(cache_records, handle, base_block.name)
+
+    @staticmethod
+    def _dynamic_insert_cache_records(
+        entity: Insert,
+    ) -> list[tuple[str, tuple[tuple[int, Any], ...]]]:
+        if not entity.has_extension_dict:
+            return []
+        rep = entity.get_extension_dict().dictionary.get("AcDbBlockRepresentation")
+        if not isinstance(rep, Dictionary):
+            return []
+        cache = rep.get("AppDataCache")
+        if not isinstance(cache, Dictionary):
+            return []
+        enhanced = cache.get("ACAD_ENHANCEDBLOCKDATA")
+        if not isinstance(enhanced, Dictionary):
+            return []
+        records: list[tuple[str, tuple[tuple[int, Any], ...]]] = []
+        for key, value in enhanced.items():
+            if isinstance(value, XRecord):
+                records.append((str(key), tuple((tag.code, tag.value) for tag in value.tags)))
+        return records
+
+    def _emit_dynamic_insert_cache_records(
+        self,
+        records: list[tuple[str, tuple[tuple[int, Any], ...]]],
+        handle: str,
+        base_block_name: str,
+    ) -> None:
+        if not records:
+            return
+        self.add_import_statement(
+            "from ezdxf.dynblkhelper import set_dynamic_block_insert_cache_record"
+        )
+        self.add_deferred_source_code_line(
+            f"_base = {self.doc}.blocks.get({json.dumps(base_block_name)})"
+        )
+        for key, tags in records:
+            self.add_deferred_source_code_line(
+                f"set_dynamic_block_insert_cache_record(_entity_map[{json.dumps(handle)}], {json.dumps(key)}, {self._format_python_value(tags)}, _base)"
+            )
 
     def _format_python_value(self, value: Any) -> str:
         if isinstance(value, str):
@@ -1506,6 +1578,14 @@ class _SourceCodeGenerator:
         self.add_source_code_lines(
             self.generic_api_call("ATTDEF", entity.dxfattribs())
         )
+        rep_index = self._attdef_rep_index(entity)
+        if rep_index is not None:
+            self.add_import_statement(
+                "from ezdxf.dynblkhelper import setup_dynamic_block_property_attdef_support"
+            )
+            self.add_source_code_line(
+                f"setup_dynamic_block_property_attdef_support(e, {rep_index}, annotative={entity.has_xdata('AcadAnnotative')})"
+            )
 
     def _mleaderstyle(self, entity: DXFEntity) -> None:
         self._setup_multileader_style(entity, entity.dxf.name)
@@ -1538,6 +1618,24 @@ class _SourceCodeGenerator:
             )
         )
         self._schedule_dynamic_block_insert_state(entity)
+        if entity.has_extension_dict:
+            xdict = entity.get_extension_dict().dictionary
+            if "AcDbContextDataManager" in xdict:
+                self.add_source_code_line(
+                    "_xdict = e.get_extension_dict() if e.has_extension_dict else e.new_extension_dict()"
+                )
+                self.add_source_code_line(
+                    "_ctx = _xdict.dictionary.get('AcDbContextDataManager')"
+                )
+                self.add_source_code_line(
+                    "if _ctx is None: _ctx = _xdict.dictionary.add_new_dict('AcDbContextDataManager')"
+                )
+                self.add_source_code_line(
+                    "_scales = _ctx.get('ACDB_ANNOTATIONSCALES')"
+                )
+                self.add_source_code_line(
+                    "if _scales is None: _scales = _ctx.add_new_dict('ACDB_ANNOTATIONSCALES')"
+                )
         if len(entity.attribs):
             for attrib in entity.attribs:
                 dxfattribs = _purge_handles(attrib.dxfattribs())
@@ -1562,6 +1660,32 @@ class _SourceCodeGenerator:
         # MTEXT content 'text' is not a single DXF tag and therefore not a DXF
         # attribute
         self.add_source_code_line("e.text = {}".format(json.dumps(entity.text)))
+        if entity.has_extension_dict and "AcDbContextDataManager" in entity.get_extension_dict().dictionary:
+            self.add_source_code_line(
+                "_xdict = e.get_extension_dict() if e.has_extension_dict else e.new_extension_dict()"
+            )
+            self.add_source_code_line(
+                "_ctx = _xdict.dictionary.get('AcDbContextDataManager')"
+            )
+            self.add_source_code_line(
+                "if _ctx is None: _ctx = _xdict.dictionary.add_new_dict('AcDbContextDataManager')"
+            )
+            self.add_source_code_line(
+                "_scales = _ctx.get('ACDB_ANNOTATIONSCALES')"
+            )
+            self.add_source_code_line(
+                "if _scales is None: _scales = _ctx.add_new_dict('ACDB_ANNOTATIONSCALES')"
+            )
+        if entity.has_extension_dict and "ACAD_FIELD" in entity.get_extension_dict().dictionary:
+            field_dict = entity.get_extension_dict().dictionary.get("ACAD_FIELD")
+            is_empty_field_dict = hasattr(field_dict, "items") and len(list(field_dict.items())) == 0
+            if is_empty_field_dict:
+                self.add_source_code_line(
+                    "_xdict = e.get_extension_dict() if e.has_extension_dict else e.new_extension_dict()"
+                )
+                self.add_source_code_line(
+                    "if 'ACAD_FIELD' not in _xdict.dictionary: _xdict.dictionary.add_new_dict('ACAD_FIELD', hard_owned=True)"
+                )
 
     def _acad_table(self, entity: DXFEntity) -> None:
         data = getattr(entity, "data", None)

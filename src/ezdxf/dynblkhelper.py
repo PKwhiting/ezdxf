@@ -60,8 +60,11 @@ __all__ = [
     "get_dynamic_block_property_assoc_networks",
     "get_dynamic_block_property_representations",
     "get_dynamic_block_property_representation_families",
+    "setup_dynamic_block_property_attdef_support",
     "set_dynamic_block_linear_parameter",
     "set_dynamic_block_base_point_parameter",
+    "set_dynamic_block_insert_cache_record",
+    "set_dynamic_block_insert_cache",
     "set_dynamic_block_lookup_parameter",
     "set_dynamic_block_properties_editor_support",
     "set_dynamic_block_properties_table",
@@ -183,6 +186,17 @@ def _ensure_property_attdef_annotative_metadata(attdef) -> None:
 def _ensure_property_attdef_metadata(attdef, rep_index: int) -> None:
     _set_property_attdef_rep_etag(attdef, rep_index)
     _ensure_property_attdef_annotative_metadata(attdef)
+
+
+def setup_dynamic_block_property_attdef_support(
+    attdef,
+    rep_index: int,
+    *,
+    annotative: bool = False,
+) -> None:
+    _set_property_attdef_rep_etag(attdef, rep_index)
+    if annotative:
+        _ensure_property_attdef_annotative_metadata(attdef)
 
 
 def _get_property_attdefs(block: BlockLayout) -> tuple:
@@ -4859,6 +4873,7 @@ def set_dynamic_block_visibility_state(
     *,
     state: str,
     location: Optional[tuple[float, float, float]] = None,
+    update_cache: bool = True,
 ) -> None:
     """Attach the current visibility-state cache to a dynamic block insert."""
     if dynamic_block is None:
@@ -4883,13 +4898,15 @@ def set_dynamic_block_visibility_state(
             state,
             dynamic_block=dynamic_block,
         )
-        if len(parameter.states):
-            _apply_property_attdef_visibility(
-                reference,
-                dynamic_block,
-                state,
-                parameter.states[0].name,
-            )
+    if len(parameter.states):
+        _apply_property_attdef_visibility(
+            reference,
+            dynamic_block,
+            state,
+            parameter.states[0].name,
+        )
+    if not update_cache:
+        return
     xdict = insert.get_extension_dict() if insert.has_extension_dict else insert.new_extension_dict()
     root = xdict.dictionary
     rep = root.get("AcDbBlockRepresentation")
@@ -4925,3 +4942,91 @@ def set_dynamic_block_visibility_state(
             (1, state),
         ]
     )
+
+
+def set_dynamic_block_insert_cache(
+    insert: Insert,
+    dynamic_block: Optional[BlockLayout] = None,
+    *,
+    location: Optional[tuple[float, float, float]] = None,
+    update_cache: bool = True,
+) -> None:
+    if dynamic_block is None:
+        dynamic_block = get_dynamic_block_definition(insert)
+    if dynamic_block is None:
+        raise const.DXFStructureError("dynamic block definition not found")
+    if insert.doc is None:
+        raise const.DXFStructureError("valid DXF document required")
+    if location is None:
+        location = tuple(insert.dxf.insert)
+    reference = get_dynamic_block_reference(insert)
+    if reference is not None:
+        if not reference.block_record.has_extension_dict:
+            reference.block_record.new_extension_dict()
+        reference.block_record.blkref_handles = [insert.dxf.handle]
+    if not update_cache:
+        return
+
+    enhanced = _ensure_dynamic_insert_cache_dictionary(insert, dynamic_block)
+    xrecord = enhanced.get("1")
+    if not isinstance(xrecord, XRecord):
+        xrecord = enhanced.add_xrecord("1")
+    xrecord.set_reactors([enhanced.dxf.handle])
+    xrecord.reset(
+        [
+            (1071, 82437801),
+            (1071, 112294725),
+            (70, 25),
+            (70, 104),
+            (10, location),
+        ]
+    )
+
+
+def _ensure_dynamic_insert_cache_dictionary(
+    insert: Insert,
+    dynamic_block: BlockLayout,
+) -> Dictionary:
+    if insert.doc is None:
+        raise const.DXFStructureError("valid DXF document required")
+
+    xdict = insert.get_extension_dict() if insert.has_extension_dict else insert.new_extension_dict()
+    root = xdict.dictionary
+    rep = root.get("AcDbBlockRepresentation")
+    if not isinstance(rep, Dictionary):
+        rep = root.add_new_dict("AcDbBlockRepresentation", hard_owned=True)
+    repdata = rep.get("AcDbRepData")
+    if not isinstance(repdata, DXFTagStorage) or repdata.dxftype() != "ACDB_BLOCKREPRESENTATION_DATA":
+        repdata = _new_tag_storage_object(
+            dynamic_block.doc,
+            "ACDB_BLOCKREPRESENTATION_DATA",
+            rep.dxf.handle,
+            [[(100, "AcDbBlockRepresentationData"), (70, 1), (340, dynamic_block.block_record_handle)]],
+        )
+        rep.add("AcDbRepData", repdata)
+    app_cache = rep.get("AppDataCache")
+    if not isinstance(app_cache, Dictionary):
+        app_cache = rep.add_new_dict("AppDataCache", hard_owned=True)
+    enhanced = app_cache.get("ACAD_ENHANCEDBLOCKDATA")
+    if not isinstance(enhanced, Dictionary):
+        enhanced = app_cache.add_new_dict("ACAD_ENHANCEDBLOCKDATA", hard_owned=True)
+    enhanced.set_reactors([app_cache.dxf.handle])
+    return enhanced
+
+
+def set_dynamic_block_insert_cache_record(
+    insert: Insert,
+    key: str,
+    tags: Sequence[tuple[int, Any]],
+    dynamic_block: Optional[BlockLayout] = None,
+) -> None:
+    if dynamic_block is None:
+        dynamic_block = get_dynamic_block_definition(insert)
+    if dynamic_block is None:
+        raise const.DXFStructureError("dynamic block definition not found")
+    enhanced = _ensure_dynamic_insert_cache_dictionary(insert, dynamic_block)
+    xrecord = enhanced.get(key)
+    if not isinstance(xrecord, XRecord):
+        xrecord = enhanced.add_xrecord(key)
+    xrecord.set_reactors([enhanced.dxf.handle])
+    xrecord.reset(tags)
