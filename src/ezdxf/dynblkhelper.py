@@ -1228,6 +1228,35 @@ def _delete_assoc_networks(block_record: BlockRecord) -> None:
                 doc.objects.delete_entity(obj)
 
 
+def _delete_owned_object_tree(doc: Drawing, owner_handle: str) -> None:
+    if not owner_handle:
+        return
+    children = [entity for entity in doc.objects if entity.dxf.owner == owner_handle]
+    for entity in children:
+        handle = entity.dxf.handle or ""
+        if isinstance(entity, Dictionary) and entity.is_hard_owner:
+            doc.objects.delete_entity(entity)
+            continue
+        _delete_owned_object_tree(doc, handle)
+        if entity.is_alive:
+            doc.objects.delete_entity(entity)
+
+
+def _delete_hidden_dynamic_support_blocks(block_record: BlockRecord) -> None:
+    doc = block_record.doc
+    if doc is None:
+        return
+    to_delete: list[str] = []
+    for candidate in _iter_dynamic_reference_block_records(block_record, doc):
+        if candidate.blkref_handles:
+            continue
+        _delete_owned_object_tree(doc, candidate.dxf.handle or "")
+        to_delete.append(candidate.dxf.name)
+    for name in to_delete:
+        if name in doc.blocks:
+            doc.blocks.delete_block(name, safe=False)
+
+
 def _clone_non_attdef_entities(source_block: BlockLayout, target_block: BlockLayout) -> None:
     for entity in source_block:
         if entity.dxftype() == "ATTDEF":
@@ -1885,6 +1914,12 @@ def set_dynamic_block_properties_table(
     visibility = get_dynamic_block_visibility_parameter(block)
     if visibility is None:
         raise const.DXFValueError("dynamic block has no visibility parameter")
+    linear_parameters = get_dynamic_block_linear_parameters(block)
+    stretch_actions = get_dynamic_block_stretch_actions(block)
+    if len(linear_parameters) > 1:
+        raise const.DXFValueError("multiple dynamic block linear parameters are not supported")
+    if len(stretch_actions) != len(linear_parameters):
+        raise const.DXFValueError("linear parameter and stretch action counts do not match")
 
     resolved_columns = _resolve_property_table_columns(block, table, visibility)
     _tag_block_representation_entities(block)
@@ -2119,6 +2154,9 @@ def set_dynamic_block_properties_table(
     ]
     _patch_eval_graph_handles(graph, handles)
 
+    if linear_parameters:
+        set_dynamic_block_linear_parameter(block, linear_parameters[0], stretch_actions[0])
+
     return DynamicBlockPropertiesTable(
         handle=table_entity.dxf.handle or "",
         label=table.label,
@@ -2147,6 +2185,8 @@ def set_dynamic_block_linear_parameter(
     doc = block.doc
     if doc is None:
         raise const.DXFStructureError("valid DXF document required")
+    if get_dynamic_block_linear_parameters(block):
+        raise const.DXFValueError("multiple dynamic block linear parameters are not supported")
     visibility = get_dynamic_block_visibility_parameter(block)
     properties = get_dynamic_block_properties_table(block)
     if visibility is None or properties is None:
@@ -2428,6 +2468,7 @@ def set_dynamic_block_properties_editor_support(
     if visibility is None or properties is None:
         raise const.DXFValueError("dynamic block requires visibility and properties table")
 
+    _delete_hidden_dynamic_support_blocks(block.block_record)
     root_network = _ensure_root_assoc_network(doc)
     created: list[DynamicBlockPropertyRepresentation] = []
     child_networks: list[str] = []

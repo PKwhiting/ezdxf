@@ -749,9 +749,17 @@ class _SourceCodeGenerator:
                 self.add_import_statement(
                     "from ezdxf.dynblkhelper import DynamicBlockLinearParameter, DynamicBlockStretchAction, set_dynamic_block_linear_parameter"
                 )
+                if len(linear_parameters) != len(stretch_actions):
+                    self.add_source_code_line(
+                        "# unsupported dynamic block linear metadata: parameter/action count mismatch"
+                    )
+                    return
+                if len(linear_parameters) > 1:
+                    self.add_source_code_line(
+                        "# unsupported dynamic block linear metadata: multiple linear parameters"
+                    )
+                    return
                 for index, linear in enumerate(linear_parameters):
-                    if index >= len(stretch_actions):
-                        break
                     action = stretch_actions[index]
                     linear_var = f"_dyn_linear_{index}"
                     action_var = f"_dyn_stretch_{index}"

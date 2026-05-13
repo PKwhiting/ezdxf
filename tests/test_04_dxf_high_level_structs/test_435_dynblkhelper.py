@@ -1,5 +1,6 @@
 from io import StringIO
 
+import pytest
 import ezdxf
 from ezdxf.dynblkhelper import (
     _new_tag_storage_object,
@@ -787,6 +788,29 @@ def test_dynamic_block_property_representation_families_group_by_signature():
     assert counts[(3, ("Block Table1", "Block Table1", "Block Table1"), (1, 1, 1), ())] == 2
 
 
+def test_dynamic_block_properties_editor_support_rerun_replaces_hidden_support():
+    doc = ezdxf.new("R2018")
+    insert = make_dynamic_properties_insert(doc)
+    base = get_dynamic_block_definition(insert)
+    table = get_dynamic_block_properties_table(base)
+
+    assert base is not None
+    assert table is not None
+    reps_before = get_dynamic_block_property_representations(base)
+    assoc_before = get_dynamic_block_property_assoc_networks(base)
+    anon_before = sum(1 for block in doc.blocks if block.name.startswith("*U"))
+
+    set_dynamic_block_properties_editor_support(base, table)
+
+    reps_after = get_dynamic_block_property_representations(base)
+    assoc_after = get_dynamic_block_property_assoc_networks(base)
+    anon_after = sum(1 for block in doc.blocks if block.name.startswith("*U"))
+
+    assert len(reps_after) == len(reps_before)
+    assert len(assoc_after) == len(assoc_before)
+    assert anon_after == anon_before
+
+
 def test_get_dynamic_block_linear_parameters_and_grips_reads_linear_stack():
     doc = ezdxf.new("R2018")
     insert = make_dynamic_properties_insert(doc)
@@ -920,3 +944,114 @@ def test_set_dynamic_block_linear_parameter_patches_graph_and_visibility():
 
     assert ref is not None
     assert [entity.dxf.get("invisible", 0) for entity in ref if entity.dxftype() == "ATTDEF"] == [0, 0, 0]
+
+
+def test_set_dynamic_block_properties_table_preserves_existing_linear_parameter():
+    doc = ezdxf.new("R2018")
+    insert = make_dynamic_properties_insert(doc)
+    base = get_dynamic_block_definition(insert)
+
+    assert base is not None
+    entities = list(base)
+    stretch_entity = entities[0]
+    attdef1 = next(entity for entity in entities if entity.dxftype() == "ATTDEF" and entity.dxf.tag == "PARAM_1")
+    attdef2 = next(entity for entity in entities if entity.dxftype() == "ATTDEF" and entity.dxf.tag == "PARAM_2")
+    attdef3 = next(entity for entity in entities if entity.dxftype() == "ATTDEF" and entity.dxf.tag == "PARAM_3")
+    table = get_dynamic_block_properties_table(base)
+    grip = next(obj for obj in doc.objects if obj.dxftype() == "BLOCKPROPERTIESTABLEGRIP")
+
+    assert table is not None
+    linear = DynamicBlockLinearParameter(
+        handle="",
+        label="Linear",
+        parameter_name="Distance1",
+        description="",
+        base_point=(0.0, 0.0, 0.0),
+        end_point=(1.0, 0.0, 0.0),
+        distance=1.0,
+        expr_id=0,
+        base_grip_label="Base Grip",
+        end_grip_label="End Grip",
+    )
+    action = DynamicBlockStretchAction(
+        handle="",
+        label="Stretch1",
+        action_location=(1.0, -0.5, 0.0),
+        x_expr_id=0,
+        x_name="EndXDelta",
+        y_expr_id=0,
+        y_name="EndYDelta",
+        selection_window=((2.0, 1.0, 0.0), (0.5, -0.5, 0.0)),
+        dependency_handles=(
+            grip.dxf.handle,
+            table.handle,
+            attdef3.dxf.handle,
+            attdef2.dxf.handle,
+            attdef1.dxf.handle,
+            stretch_entity.dxf.handle,
+        ),
+        targets=(
+            DynamicBlockStretchActionTarget(stretch_entity.dxf.handle, 2, (1, 2)),
+            DynamicBlockStretchActionTarget(attdef1.dxf.handle, 1, (0,)),
+            DynamicBlockStretchActionTarget(attdef2.dxf.handle, 1, (0,)),
+            DynamicBlockStretchActionTarget(attdef3.dxf.handle, 1, (0,)),
+        ),
+    )
+    set_dynamic_block_linear_parameter(base, linear, action)
+
+    rewritten = DynamicBlockPropertiesTable(
+        handle="",
+        label=table.label,
+        table_name=table.table_name,
+        description=table.description,
+        location=table.location,
+        grip_location=table.grip_location,
+        columns=table.columns,
+        rows=table.rows,
+    )
+    set_dynamic_block_properties_table(base, rewritten)
+
+    new_linear = get_dynamic_block_linear_parameters(base)
+    new_actions = get_dynamic_block_stretch_actions(base)
+
+    assert len(new_linear) == 1
+    assert new_linear[0].parameter_name == "Distance1"
+    assert new_linear[0].base_grip_label == "Base Grip"
+    assert len(new_actions) == 1
+    assert new_actions[0].label == "Stretch1"
+
+
+def test_set_dynamic_block_linear_parameter_rejects_second_linear_parameter():
+    doc = ezdxf.new("R2018")
+    insert = make_dynamic_properties_insert(doc)
+    base = get_dynamic_block_definition(insert)
+
+    assert base is not None
+    parameter = DynamicBlockLinearParameter(
+        handle="",
+        label="Linear",
+        parameter_name="Distance1",
+        description="",
+        base_point=(0.0, 0.0, 0.0),
+        end_point=(1.0, 0.0, 0.0),
+        distance=1.0,
+        expr_id=0,
+        base_grip_label="Base Grip",
+        end_grip_label="End Grip",
+    )
+    action = DynamicBlockStretchAction(
+        handle="",
+        label="Stretch1",
+        action_location=(1.0, -0.5, 0.0),
+        x_expr_id=0,
+        x_name="EndXDelta",
+        y_expr_id=0,
+        y_name="EndYDelta",
+        selection_window=((2.0, 1.0, 0.0), (0.5, -0.5, 0.0)),
+        dependency_handles=(),
+        targets=(),
+    )
+    set_dynamic_block_linear_parameter(base, parameter, action)
+
+    with pytest.raises(ezdxf.DXFValueError):
+        set_dynamic_block_linear_parameter(base, parameter, action)
