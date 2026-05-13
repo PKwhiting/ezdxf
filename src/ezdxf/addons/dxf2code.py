@@ -695,6 +695,7 @@ class _SourceCodeGenerator:
 
     def _emit_dynamic_block_metadata(self, block) -> None:
         from ezdxf.dynblkhelper import (
+            get_dynamic_block_base_point_parameter,
             get_dynamic_block_linear_parameters,
             get_dynamic_block_lookup_actions,
             get_dynamic_block_lookup_parameters,
@@ -707,6 +708,7 @@ class _SourceCodeGenerator:
 
         block_record = block.block_record
         if is_dynamic_block_definition(block_record):
+            base_point_parameter = get_dynamic_block_base_point_parameter(block)
             linear_parameters = get_dynamic_block_linear_parameters(block)
             lookup_parameters = get_dynamic_block_lookup_parameters(block)
             lookup_actions = get_dynamic_block_lookup_actions(block)
@@ -797,6 +799,31 @@ class _SourceCodeGenerator:
                 self.add_source_code_line("    rows=_dyn_property_rows,")
                 self.add_source_code_line(")")
                 self.add_source_code_line("_dyn_props = set_dynamic_block_properties_table(b, _dyn_props)")
+            if properties_table is not None and base_point_parameter is not None:
+                self.add_import_statement(
+                    "from ezdxf.dynblkhelper import DynamicBlockBasePointParameter, set_dynamic_block_base_point_parameter"
+                )
+                self.add_source_code_line("_dyn_basepoint = DynamicBlockBasePointParameter(")
+                self.add_source_code_line("    handle='',")
+                self.add_source_code_line(
+                    f"    label={json.dumps(base_point_parameter.label)},"
+                )
+                self.add_source_code_line(
+                    f"    location={self._format_python_value(base_point_parameter.location)},"
+                )
+                self.add_source_code_line(
+                    f"    base_point={self._format_python_value(base_point_parameter.base_point)},"
+                )
+                self.add_source_code_line(
+                    f"    second_point={self._format_python_value(base_point_parameter.second_point)},"
+                )
+                self.add_source_code_line(
+                    f"    expr_id={self._format_python_value(base_point_parameter.expr_id)},"
+                )
+                self.add_source_code_line(")")
+                self.add_source_code_line(
+                    "set_dynamic_block_base_point_parameter(b, _dyn_basepoint)"
+                )
             if properties_table is not None and linear_parameters:
                 self.add_import_statement(
                     "from ezdxf.dynblkhelper import DynamicBlockLinearParameter, DynamicBlockStretchAction, set_dynamic_block_linear_parameter"

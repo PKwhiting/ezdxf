@@ -4,6 +4,7 @@ import pytest
 import ezdxf
 from ezdxf.dynblkhelper import (
     _new_tag_storage_object,
+    DynamicBlockBasePointParameter,
     DynamicBlockPropertiesTable,
     DynamicBlockPropertyColumn,
     DynamicBlockPropertyRow,
@@ -18,6 +19,7 @@ from ezdxf.dynblkhelper import (
     DynamicBlockVisibilityParameter,
     DynamicBlockVisibilityState,
     get_dynamic_block_definition,
+    get_dynamic_block_base_point_parameter,
     get_dynamic_block_linear_grips,
     get_dynamic_block_linear_parameters,
     get_dynamic_block_lookup_actions,
@@ -37,6 +39,7 @@ from ezdxf.dynblkhelper import (
     get_dynamic_block_visibility_state,
     get_dynamic_block_visibility_state_handles,
     get_dynamic_block_visibility_states,
+    set_dynamic_block_base_point_parameter,
     set_dynamic_block_linear_parameter,
     set_dynamic_block_lookup_parameter,
     set_dynamic_block_properties_table,
@@ -1302,6 +1305,103 @@ def test_set_dynamic_block_linear_parameter_rejects_second_linear_parameter():
 
     with pytest.raises(ezdxf.DXFValueError):
         set_dynamic_block_linear_parameter(base, parameter, action)
+
+
+def test_set_dynamic_block_base_point_parameter_roundtrip_helper():
+    doc = ezdxf.new("R2018")
+    insert = make_dynamic_properties_insert(doc)
+    base = get_dynamic_block_definition(insert)
+
+    assert base is not None
+    created = set_dynamic_block_base_point_parameter(
+        base,
+        DynamicBlockBasePointParameter(
+            handle="",
+            label="Base Point",
+            location=(0.0, 0.0, 0.0),
+            base_point=(0.0, 0.0, 0.0),
+            second_point=(0.0, 0.0, 0.0),
+            expr_id=0,
+        ),
+    )
+    parsed = get_dynamic_block_base_point_parameter(base)
+
+    assert created.handle
+    assert parsed is not None
+    assert parsed.handle == created.handle
+    assert parsed.label == "Base Point"
+    assert parsed.base_point == (0.0, 0.0, 0.0)
+
+
+def test_set_dynamic_block_linear_parameter_uses_basepoint_branch_when_present():
+    doc = ezdxf.new("R2018")
+    insert = make_dynamic_properties_insert(doc)
+    base = get_dynamic_block_definition(insert)
+
+    assert base is not None
+    entities = list(base)
+    stretch_entity = entities[0]
+    attdef1 = next(entity for entity in entities if entity.dxftype() == "ATTDEF" and entity.dxf.tag == "PARAM_1")
+    attdef2 = next(entity for entity in entities if entity.dxftype() == "ATTDEF" and entity.dxf.tag == "PARAM_2")
+    attdef3 = next(entity for entity in entities if entity.dxftype() == "ATTDEF" and entity.dxf.tag == "PARAM_3")
+    table = get_dynamic_block_properties_table(base)
+    grip = next(obj for obj in doc.objects if obj.dxftype() == "BLOCKPROPERTIESTABLEGRIP")
+
+    assert table is not None
+    set_dynamic_block_base_point_parameter(
+        base,
+        DynamicBlockBasePointParameter(
+            handle="",
+            label="Base Point",
+            location=(0.0, 0.0, 0.0),
+            base_point=(0.0, 0.0, 0.0),
+            second_point=(0.0, 0.0, 0.0),
+            expr_id=0,
+        ),
+    )
+    linear = DynamicBlockLinearParameter(
+        handle="",
+        label="Linear",
+        parameter_name="Distance1",
+        description="",
+        base_point=(0.0, 0.0, 0.0),
+        end_point=(1.0, 0.0, 0.0),
+        distance=1.0,
+        expr_id=0,
+        end_grip_label="End Grip",
+    )
+    action = DynamicBlockStretchAction(
+        handle="",
+        label="Stretch",
+        action_location=(1.0, -0.5, 0.0),
+        x_expr_id=0,
+        x_name="EndXDelta",
+        y_expr_id=0,
+        y_name="EndYDelta",
+        selection_window=((2.0, 1.0, 0.0), (0.5, -0.5, 0.0)),
+        dependency_handles=(
+            grip.dxf.handle,
+            table.handle,
+            attdef3.dxf.handle,
+            attdef2.dxf.handle,
+            attdef1.dxf.handle,
+            stretch_entity.dxf.handle,
+        ),
+        targets=(
+            DynamicBlockStretchActionTarget(stretch_entity.dxf.handle, 2, (1, 2)),
+            DynamicBlockStretchActionTarget(attdef1.dxf.handle, 1, (0,)),
+            DynamicBlockStretchActionTarget(attdef2.dxf.handle, 1, (0,)),
+            DynamicBlockStretchActionTarget(attdef3.dxf.handle, 1, (0,)),
+        ),
+    )
+    created = set_dynamic_block_linear_parameter(base, linear, action)
+    parsed = get_dynamic_block_linear_parameters(base)
+
+    assert created.handle
+    assert len(parsed) == 1
+    assert parsed[0].handle == created.handle
+    assert parsed[0].base_grip_handle == ""
+    assert parsed[0].end_grip_handle
 
 
 def test_set_dynamic_block_lookup_parameter_patches_graph_and_linear_values():

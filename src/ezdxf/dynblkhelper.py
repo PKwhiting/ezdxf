@@ -22,6 +22,7 @@ if TYPE_CHECKING:
 __all__ = [
     "DynamicBlockVisibilityState",
     "DynamicBlockVisibilityParameter",
+    "DynamicBlockBasePointParameter",
     "DynamicBlockLinearGrip",
     "DynamicBlockLinearParameter",
     "DynamicBlockLookupGrip",
@@ -46,6 +47,7 @@ __all__ = [
     "get_dynamic_block_visibility_state",
     "get_dynamic_block_visibility_state_handles",
     "get_dynamic_block_visibility_entities",
+    "get_dynamic_block_base_point_parameter",
     "get_dynamic_block_linear_grips",
     "get_dynamic_block_linear_parameters",
     "get_dynamic_block_lookup_grips",
@@ -59,6 +61,7 @@ __all__ = [
     "get_dynamic_block_property_representations",
     "get_dynamic_block_property_representation_families",
     "set_dynamic_block_linear_parameter",
+    "set_dynamic_block_base_point_parameter",
     "set_dynamic_block_lookup_parameter",
     "set_dynamic_block_properties_editor_support",
     "set_dynamic_block_properties_table",
@@ -293,6 +296,16 @@ class DynamicBlockVisibilityParameter:
     location: tuple[float, float, float]
     states: tuple[DynamicBlockVisibilityState, ...]
     all_entity_handles: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class DynamicBlockBasePointParameter:
+    handle: str
+    label: str
+    location: tuple[float, float, float]
+    base_point: tuple[float, float, float]
+    second_point: tuple[float, float, float]
+    expr_id: int
 
 
 @dataclass(frozen=True)
@@ -643,6 +656,30 @@ def _parse_linear_grip(entity: DXFTagStorage) -> Optional[DynamicBlockLinearGrip
         expr_id=_eval_expr_id(entity),
         x_expr_id=int(grip_tags.get_first_value(91, -1)),
         y_expr_id=int(grip_tags.get_first_value(92, -1)),
+    )
+
+
+def _parse_base_point_parameter(entity: DXFTagStorage) -> Optional[DynamicBlockBasePointParameter]:
+    if entity.dxftype() != "BLOCKBASEPOINTPARAMETER":
+        return None
+    try:
+        element_tags = entity.xtags.get_subclass("AcDbBlockElement")
+        point_tags = entity.xtags.get_subclass("AcDbBlock1PtParameter")
+        basepoint_tags = entity.xtags.get_subclass("AcDbBlockBasepointParameter")
+    except const.DXFKeyError:
+        return None
+    location = point_tags.get_first_value(1010, None)
+    base_point = basepoint_tags.get_first_value(1011, None)
+    second_point = basepoint_tags.get_first_value(1012, None)
+    if location is None or base_point is None or second_point is None:
+        return None
+    return DynamicBlockBasePointParameter(
+        handle=entity.dxf.handle or "",
+        label=str(element_tags.get_first_value(300, "")),
+        location=_point3d(location),
+        base_point=_point3d(base_point),
+        second_point=_point3d(second_point),
+        expr_id=_eval_expr_id(entity),
     )
 
 
@@ -1176,6 +1213,16 @@ def get_dynamic_block_linear_grips(
         if grip is not None:
             result.append(grip)
     return tuple(result)
+
+
+def get_dynamic_block_base_point_parameter(
+    source: Union[Insert, BlockLayout, BlockRecord], doc: Optional[Drawing] = None
+) -> Optional[DynamicBlockBasePointParameter]:
+    for entity in _get_dynamic_graph_owned_objects(source, doc):
+        parameter = _parse_base_point_parameter(entity)
+        if parameter is not None:
+            return parameter
+    return None
 
 
 def get_dynamic_block_linear_parameters(
@@ -2560,6 +2607,210 @@ def _build_lookup_action_subclass(action: DynamicBlockLookupAction) -> list[tupl
     return tags
 
 
+def _build_basepoint_linear_eval_graph_subclass() -> list[tuple[int, Any]]:
+    return [
+        (100, "AcDbEvalGraph"),
+        (96, 20),
+        (97, 20),
+        (91, 0),
+        (93, 32),
+        (95, 1),
+        (360, "0"),
+        (92, 3),
+        (92, 3),
+        (92, 4),
+        (92, 4),
+        (91, 1),
+        (93, 32),
+        (95, 5),
+        (360, "0"),
+        (92, 9),
+        (92, 9),
+        (92, -1),
+        (92, -1),
+        (91, 2),
+        (93, 32),
+        (95, 6),
+        (360, "0"),
+        (92, 0),
+        (92, 4),
+        (92, 1),
+        (92, 3),
+        (91, 3),
+        (93, 32),
+        (95, 7),
+        (360, "0"),
+        (92, -1),
+        (92, -1),
+        (92, 0),
+        (92, 0),
+        (91, 4),
+        (93, 32),
+        (95, 8),
+        (360, "0"),
+        (92, 1),
+        (92, 1),
+        (92, -1),
+        (92, -1),
+        (91, 5),
+        (93, 32),
+        (95, 9),
+        (360, "0"),
+        (92, 2),
+        (92, 2),
+        (92, -1),
+        (92, -1),
+        (91, 6),
+        (93, 32),
+        (95, 10),
+        (360, "0"),
+        (92, -1),
+        (92, -1),
+        (92, -1),
+        (92, -1),
+        (91, 7),
+        (93, 32),
+        (95, 16),
+        (360, "0"),
+        (92, 7),
+        (92, 7),
+        (92, 5),
+        (92, 8),
+        (91, 8),
+        (93, 32),
+        (95, 17),
+        (360, "0"),
+        (92, -1),
+        (92, -1),
+        (92, 7),
+        (92, 7),
+        (91, 9),
+        (93, 32),
+        (95, 18),
+        (360, "0"),
+        (92, 5),
+        (92, 5),
+        (92, -1),
+        (92, -1),
+        (91, 10),
+        (93, 32),
+        (95, 19),
+        (360, "0"),
+        (92, 6),
+        (92, 6),
+        (92, -1),
+        (92, -1),
+        (91, 11),
+        (93, 32),
+        (95, 20),
+        (360, "0"),
+        (92, 8),
+        (92, 8),
+        (92, 9),
+        (92, 9),
+        (92, 0),
+        (93, 0),
+        (94, 1),
+        (91, 3),
+        (91, 2),
+        (92, -1),
+        (92, 4),
+        (92, -1),
+        (92, -1),
+        (92, -1),
+        (92, 1),
+        (93, 0),
+        (94, 1),
+        (91, 2),
+        (91, 4),
+        (92, -1),
+        (92, -1),
+        (92, -1),
+        (92, 2),
+        (92, -1),
+        (92, 2),
+        (93, 0),
+        (94, 1),
+        (91, 2),
+        (91, 5),
+        (92, -1),
+        (92, -1),
+        (92, 1),
+        (92, 3),
+        (92, -1),
+        (92, 3),
+        (93, 4),
+        (94, 1),
+        (91, 2),
+        (91, 0),
+        (92, -1),
+        (92, -1),
+        (92, 2),
+        (92, -1),
+        (92, 4),
+        (92, 4),
+        (93, 4),
+        (94, 1),
+        (91, 0),
+        (91, 2),
+        (92, 0),
+        (92, -1),
+        (92, -1),
+        (92, -1),
+        (92, 3),
+        (92, 5),
+        (93, 0),
+        (94, 1),
+        (91, 7),
+        (91, 9),
+        (92, -1),
+        (92, -1),
+        (92, -1),
+        (92, 6),
+        (92, -1),
+        (92, 6),
+        (93, 0),
+        (94, 1),
+        (91, 7),
+        (91, 10),
+        (92, -1),
+        (92, -1),
+        (92, 5),
+        (92, 8),
+        (92, -1),
+        (92, 7),
+        (93, 0),
+        (94, 2),
+        (91, 8),
+        (91, 7),
+        (92, -1),
+        (92, -1),
+        (92, -1),
+        (92, -1),
+        (92, -1),
+        (92, 8),
+        (93, 0),
+        (94, 2),
+        (91, 7),
+        (91, 11),
+        (92, -1),
+        (92, -1),
+        (92, 6),
+        (92, -1),
+        (92, -1),
+        (92, 9),
+        (93, 0),
+        (94, 1),
+        (91, 11),
+        (91, 1),
+        (92, -1),
+        (92, -1),
+        (92, -1),
+        (92, -1),
+        (92, -1),
+    ]
+
+
 def set_dynamic_block_properties_table(
     block: BlockLayout,
     table: DynamicBlockPropertiesTable,
@@ -2840,6 +3091,40 @@ def set_dynamic_block_properties_table(
     )
 
 
+def set_dynamic_block_base_point_parameter(
+    block: BlockLayout,
+    parameter: DynamicBlockBasePointParameter,
+) -> DynamicBlockBasePointParameter:
+    doc = block.doc
+    if doc is None:
+        raise const.DXFStructureError("valid DXF document required")
+    graph = _get_enhanced_block_graph(block.block_record)
+    if graph is None:
+        raise const.DXFStructureError("dynamic block graph not found")
+    if get_dynamic_block_base_point_parameter(block) is not None:
+        raise const.DXFValueError("multiple dynamic block base point parameters are not supported")
+    entity = _new_tag_storage_object(
+        doc,
+        "BLOCKBASEPOINTPARAMETER",
+        graph.dxf.handle,
+        [
+            [(100, "AcDbEvalExpr"), (90, 5), (98, 33), (99, 378)],
+            [(100, "AcDbBlockElement"), (300, parameter.label), (98, 33), (99, 378), (1071, 0)],
+            [(100, "AcDbBlockParameter"), (280, 1), (281, 0)],
+            [(100, "AcDbBlock1PtParameter"), (1010, parameter.location), (93, 0), (170, 0), (171, 0)],
+            [(100, "AcDbBlockBasepointParameter"), (1011, parameter.base_point), (1012, parameter.second_point)],
+        ],
+    )
+    return DynamicBlockBasePointParameter(
+        handle=entity.dxf.handle or "",
+        label=parameter.label,
+        location=parameter.location,
+        base_point=parameter.base_point,
+        second_point=parameter.second_point,
+        expr_id=5,
+    )
+
+
 def set_dynamic_block_linear_parameter(
     block: BlockLayout,
     parameter: DynamicBlockLinearParameter,
@@ -2852,6 +3137,7 @@ def set_dynamic_block_linear_parameter(
         raise const.DXFValueError("multiple dynamic block linear parameters are not supported")
     visibility = get_dynamic_block_visibility_parameter(block)
     properties = get_dynamic_block_properties_table(block)
+    basepoint = get_dynamic_block_base_point_parameter(block)
     if visibility is None or properties is None:
         raise const.DXFValueError("dynamic block requires visibility and properties table")
     graph = _get_enhanced_block_graph(block.block_record)
@@ -2920,6 +3206,219 @@ def set_dynamic_block_linear_parameter(
     allowed_values = parameter.allowed_values
     value_count = parameter.value_count or len(allowed_values)
     value_set_type = parameter.value_set_type or 1
+
+    if basepoint is not None:
+        basepoint_entity = next((entity for entity in owned if entity.dxftype() == "BLOCKBASEPOINTPARAMETER"), None)
+        if not isinstance(basepoint_entity, DXFTagStorage):
+            raise const.DXFStructureError("base point parameter object not found")
+        _replace_subclass_tags(
+            visibility_entity.xtags.get_subclass("AcDbEvalExpr"),
+            [(100, "AcDbEvalExpr"), (90, 1), (98, 33), (99, 378)],
+        )
+        _replace_subclass_tags(
+            proxy.xtags.get_subclass("AcDbEvalExpr"),
+            [(100, "AcDbEvalExpr"), (90, 10), (98, 33), (99, 378)],
+        )
+        _replace_subclass_tags(
+            table_entity.xtags.get_subclass("AcDbEvalExpr"),
+            [(100, "AcDbEvalExpr"), (90, 6), (98, 33), (99, 378)],
+        )
+        table_1pt = list(table_entity.xtags.get_subclass("AcDbBlock1PtParameter"))
+        table_1pt[1] = type(table_1pt[1])(1010, properties.location)
+        table_1pt[2] = type(table_1pt[2])(93, 7)
+        _replace_subclass_tags(table_entity.xtags.get_subclass("AcDbBlock1PtParameter"), table_1pt)
+        _replace_subclass_tags(
+            table_grip.xtags.get_subclass("AcDbEvalExpr"),
+            [(100, "AcDbEvalExpr"), (90, 7), (98, 33), (99, 378)],
+        )
+        grip_sub = list(table_grip.xtags.get_subclass("AcDbBlockGrip"))
+        grip_sub[1] = type(grip_sub[1])(91, 8)
+        grip_sub[2] = type(grip_sub[2])(92, 9)
+        _replace_subclass_tags(table_grip.xtags.get_subclass("AcDbBlockGrip"), grip_sub)
+        _replace_subclass_tags(
+            x_comp.xtags.get_subclass("AcDbEvalExpr"),
+            [(100, "AcDbEvalExpr"), (90, 8), (98, 33), (99, 378), (1, ""), (70, 40), (140, 0.0)],
+        )
+        _replace_subclass_tags(
+            x_comp.xtags.get_subclass("AcDbBlockGripExpr"),
+            [(100, "AcDbBlockGripExpr"), (91, 6), (300, "UpdatedX")],
+        )
+        _replace_subclass_tags(
+            y_comp.xtags.get_subclass("AcDbEvalExpr"),
+            [(100, "AcDbEvalExpr"), (90, 9), (98, 33), (99, 378), (1, ""), (70, 40), (140, 0.0)],
+        )
+        _replace_subclass_tags(
+            y_comp.xtags.get_subclass("AcDbBlockGripExpr"),
+            [(100, "AcDbBlockGripExpr"), (91, 6), (300, "UpdatedY")],
+        )
+
+        dependency_handles = stretch_action.dependency_handles or tuple(
+            handle
+            for handle in (
+                None,
+                basepoint_entity.dxf.handle,
+                *[entity.dxf.handle for entity in reversed(list(block)) if entity.dxf.handle],
+            )
+            if handle
+        )
+        linear_entity = _new_tag_storage_object(
+            doc,
+            "BLOCKLINEARPARAMETER",
+            graph.dxf.handle,
+            [
+                [(100, "AcDbEvalExpr"), (90, 16), (98, 33), (99, 378)],
+                [(100, "AcDbBlockElement"), (300, parameter.label), (98, 33), (99, 378), (1071, 0)],
+                [(100, "AcDbBlockParameter"), (280, 1), (281, 0)],
+                [
+                    (100, "AcDbBlock2PtParameter"),
+                    (1010, parameter.base_point),
+                    (1011, parameter.end_point),
+                    (170, 4),
+                    (91, 0),
+                    (91, 17),
+                    (91, 0),
+                    (91, 0),
+                    (171, 0),
+                    (172, 0),
+                    (173, 1),
+                    (94, 17),
+                    (303, "DisplacementX"),
+                    (174, 1),
+                    (95, 17),
+                    (304, "DisplacementY"),
+                    (177, 0),
+                ],
+                [
+                    (100, "AcDbBlockLinearParameter"),
+                    (305, parameter.parameter_name),
+                    (306, parameter.description),
+                    (140, parameter.distance),
+                    (307, ""),
+                    (96, value_set_type),
+                    (141, 0.0),
+                    (142, 0.0),
+                    (143, 0.0),
+                    (175, value_count),
+                    *[(144, value) for value in allowed_values],
+                ],
+            ],
+        )
+        end_grip = _new_tag_storage_object(
+            doc,
+            "BLOCKLINEARGRIP",
+            graph.dxf.handle,
+            [
+                [(100, "AcDbEvalExpr"), (90, 17), (98, 33), (99, 378)],
+                [(100, "AcDbBlockElement"), (300, end_grip_label), (98, 33), (99, 378), (1071, 0)],
+                [(100, "AcDbBlockGrip"), (91, 18), (92, 19), (1010, parameter.end_point), (280, 1), (93, -1)],
+                [(100, "AcDbBlockLinearGrip"), (140, vector[0]), (141, vector[1]), (142, vector[2])],
+            ],
+        )
+        end_x = _new_tag_storage_object(
+            doc,
+            "BLOCKGRIPLOCATIONCOMPONENT",
+            graph.dxf.handle,
+            [
+                [(100, "AcDbEvalExpr"), (90, 18), (98, 33), (99, 378), (1, ""), (70, 40), (140, 1.797693134862314e+99)],
+                [(100, "AcDbBlockGripExpr"), (91, 16), (300, "UpdatedEndX")],
+            ],
+        )
+        end_y = _new_tag_storage_object(
+            doc,
+            "BLOCKGRIPLOCATIONCOMPONENT",
+            graph.dxf.handle,
+            [
+                [(100, "AcDbEvalExpr"), (90, 19), (98, 33), (99, 378), (1, ""), (70, 40), (140, 1.797693134862314e+99)],
+                [(100, "AcDbBlockGripExpr"), (91, 16), (300, "UpdatedEndY")],
+            ],
+        )
+        stretch = _new_tag_storage_object(
+            doc,
+            "BLOCKSTRETCHACTION",
+            graph.dxf.handle,
+            [
+                [(100, "AcDbEvalExpr"), (90, 20), (98, 33), (99, 378)],
+                [(100, "AcDbBlockElement"), (300, stretch_action.label), (98, 33), (99, 378), (1071, 0)],
+                [
+                    (100, "AcDbBlockAction"),
+                    (70, 1),
+                    (91, 5),
+                    (71, len(dependency_handles)),
+                    (330, end_grip.dxf.handle),
+                    *[(330, handle) for handle in dependency_handles],
+                    (1010, stretch_action.action_location),
+                ],
+                [
+                    (100, "AcDbBlockStretchAction"),
+                    (92, 16),
+                    (301, stretch_action.x_name or "EndXDelta"),
+                    (93, 16),
+                    (302, stretch_action.y_name or "EndYDelta"),
+                    (72, len(stretch_action.selection_window)),
+                    *[(1011, point) for point in stretch_action.selection_window],
+                    (73, len(targets)),
+                    *[
+                        tag
+                        for target in targets
+                        for tag in (
+                            (331, target.entity_handle),
+                            (74, target.mode),
+                            *[(94, component) for component in target.components],
+                        )
+                    ],
+                    (75, 1),
+                    (95, 5),
+                    (76, 1),
+                    (94, 0),
+                    (140, 1.0),
+                    (141, 0.0),
+                    (280, 0),
+                ],
+            ],
+        )
+        _replace_subclass_tags(
+            visibility_entity.xtags.get_subclass("AcDbBlockVisibilityParameter"),
+            _build_property_visibility_parameter_subclass(
+                linear_visibility,
+                table_entity.dxf.handle,
+                table_grip.dxf.handle,
+                extra_state_refs=tuple((linear_entity.dxf.handle, end_grip.dxf.handle, stretch.dxf.handle) for _ in linear_visibility.states),
+                all_handles=linear_visibility.all_entity_handles,
+            ),
+        )
+        _replace_subclass_tags(graph.xtags.get_subclass("AcDbEvalGraph"), _build_basepoint_linear_eval_graph_subclass())
+        _patch_eval_graph_handles(
+            graph,
+            [
+                visibility_entity.dxf.handle,
+                basepoint_entity.dxf.handle,
+                table_entity.dxf.handle,
+                table_grip.dxf.handle,
+                x_comp.dxf.handle,
+                y_comp.dxf.handle,
+                proxy.dxf.handle,
+                linear_entity.dxf.handle,
+                end_grip.dxf.handle,
+                end_x.dxf.handle,
+                end_y.dxf.handle,
+                stretch.dxf.handle,
+            ],
+        )
+        return DynamicBlockLinearParameter(
+            handle=linear_entity.dxf.handle or "",
+            label=parameter.label,
+            parameter_name=parameter.parameter_name,
+            description=parameter.description,
+            base_point=parameter.base_point,
+            end_point=parameter.end_point,
+            distance=parameter.distance,
+            expr_id=16,
+            end_grip_handle=end_grip.dxf.handle or "",
+            end_grip_label=end_grip_label,
+            value_set_type=value_set_type,
+            value_count=value_count,
+            allowed_values=allowed_values,
+        )
 
     linear_entity = _new_tag_storage_object(
         doc,
