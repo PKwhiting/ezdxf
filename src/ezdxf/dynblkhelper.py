@@ -4330,6 +4330,7 @@ def set_dynamic_block_reference(
     dynamic_block: BlockLayout,
     *,
     clone_property_attdefs: bool = True,
+    normalize_entities: bool = True,
 ) -> None:
     """Mark `block` as an anonymous representation of `dynamic_block`."""
     if block.doc is None:
@@ -4339,13 +4340,14 @@ def set_dynamic_block_reference(
         block.block_record.new_extension_dict()
     if clone_property_attdefs:
         _clone_property_attdefs_to_reference(block, dynamic_block)
-    _tag_block_representation_entities(block)
-    for index, entity in enumerate(block):
-        if entity.dxftype() == "ATTDEF":
-            _ensure_property_attdef_metadata(entity, index)
-    properties = get_dynamic_block_properties_table(dynamic_block)
-    if properties is not None:
-        _set_property_attdef_reactors(block, properties.handle)
+    if normalize_entities:
+        _tag_block_representation_entities(block)
+        for index, entity in enumerate(block):
+            if entity.dxftype() == "ATTDEF":
+                _ensure_property_attdef_metadata(entity, index)
+        properties = get_dynamic_block_properties_table(dynamic_block)
+        if properties is not None:
+            _set_property_attdef_reactors(block, properties.handle)
     block.block_record.set_xdata(
         AcDbBlockRepBTag,
         [(1070, 1), (1005, dynamic_block.block_record_handle)],

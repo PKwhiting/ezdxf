@@ -549,16 +549,52 @@ class _SourceCodeGenerator:
             return json.dumps(value)
         return str(value)
 
-    def _field_reset_source(self, field) -> Optional[list[str]]:
-        if len(field.child_handles):
-            return None
+    def _field_reset_source(
+        self, field, child_handle_expr: Optional[dict[str, str]] = None
+    ) -> Optional[list[str]]:
         lines: list[str] = []
         for code, value in field.tags:
-            value_str = self._format_field_tag_value(code, value)
+            if (
+                code == 360
+                and child_handle_expr is not None
+                and isinstance(value, str)
+                and value in child_handle_expr
+            ):
+                value_str = child_handle_expr[value]
+            else:
+                value_str = self._format_field_tag_value(code, value)
             if value_str is None:
                 return None
             lines.append(f"    ({code}, {value_str}),")
         return lines
+
+    def _emit_text_wrapper_construction(
+        self, wrapper, wrapper_var: str, host_var: str
+    ) -> Optional[list[str]]:
+        if not wrapper.is_text_wrapper:
+            return None
+        child_fields = wrapper.get_child_fields()
+        if not child_fields:
+            return None
+        child_vars: list[str] = []
+        child_handle_expr: dict[str, str] = {}
+        for index, child in enumerate(child_fields):
+            child_var = f"{wrapper_var}_{index}"
+            if not self._emit_field_construction(
+                child, child_var, host_var, bind_leaf_to_doc=True
+            ):
+                return None
+            child_vars.append(child_var)
+            if child.dxf.handle:
+                child_handle_expr[child.dxf.handle] = f"{child_var}.dxf.handle"
+        wrapper_reset_source = self._field_reset_source(wrapper, child_handle_expr)
+        if wrapper_reset_source is None:
+            return None
+        self.add_deferred_source_code_line(f"{wrapper_var} = Field()")
+        self.add_deferred_source_code_line(f"{wrapper_var}.reset([")
+        self.add_deferred_source_code_lines(wrapper_reset_source)
+        self.add_deferred_source_code_line("])" )
+        return child_vars
 
     def _emit_field_custom_var_setup(self, field, field_var: str, host_var: str) -> None:
         dwgprops_name = self._dwgprops_name(field)
@@ -581,7 +617,14 @@ class _SourceCodeGenerator:
             f"    _custom_vars.append({json.dumps(dwgprops_name)}, {json.dumps(dwgprops_value)})"
         )
 
-    def _emit_field_construction(self, field, field_var: str, host_var: str) -> bool:
+    def _emit_field_construction(
+        self,
+        field,
+        field_var: str,
+        host_var: str,
+        *,
+        bind_leaf_to_doc: bool = False,
+    ) -> bool:
         self.add_import_statement("from ezdxf.entities.dxfobj import Field")
         child_fields = field.get_child_fields()
         if len(child_fields):
@@ -620,7 +663,12 @@ class _SourceCodeGenerator:
         field_reset_source = self._field_reset_source(field)
         if field_reset_source is None:
             return False
-        self.add_deferred_source_code_line(f"{field_var} = Field()")
+        if bind_leaf_to_doc:
+            self.add_deferred_source_code_line(
+                f"{field_var} = {host_var}.doc.objects.add_field(owner='0')"
+            )
+        else:
+            self.add_deferred_source_code_line(f"{field_var} = Field()")
         self.add_deferred_source_code_line(f"{field_var}.reset([")
         self.add_deferred_source_code_lines(field_reset_source)
         self.add_deferred_source_code_line("])"
@@ -941,7 +989,7 @@ class _SourceCodeGenerator:
             "from ezdxf.dynblkhelper import set_dynamic_block_reference"
         )
         self.add_source_code_line(
-            f"set_dynamic_block_reference(b, {self.doc}.blocks.get({json.dumps(base_block.name)}))"
+            f"set_dynamic_block_reference(b, {self.doc}.blocks.get({json.dumps(base_block.name)}), clone_property_attdefs=False, normalize_entities=False)"
         )
 
     def _schedule_dynamic_block_insert_state(self, entity: Insert) -> None:
@@ -1229,7 +1277,7 @@ class _SourceCodeGenerator:
                 )
                 continue
             child_fields = wrapper.get_child_fields() if wrapper.is_text_wrapper else []
-            if not wrapper.is_text_wrapper or len(child_fields) != 1:
+            if not wrapper.is_text_wrapper or not child_fields:
                 self.add_deferred_source_code_line(
                     f'# unsupported hosted FIELD on {entity.dxftype()} key {json.dumps(key)}'
                 )
@@ -1238,25 +1286,56 @@ class _SourceCodeGenerator:
             self.add_deferred_source_code_line(
                 f'_host = _entity_map[{json.dumps(handle)}]'
             )
-            if not self._emit_field_construction(child, "_field", "_host"):
+            register_field_list = self._uses_field_list(wrapper, child)
+            if len(child_fields) == 1:
+                if not self._emit_field_construction(child, "_field", "_host"):
+                    self.add_deferred_source_code_line(
+                        f'# unsupported hosted FIELD on {entity.dxftype()} key {json.dumps(key)}'
+                    )
+                    continue
+                self.add_deferred_source_code_line("_wrapper = _host.set_linked_field(")
+                self.add_deferred_source_code_line(
+                    "    _field,"
+                )
+                self.add_deferred_source_code_line(
+                    f"    key={json.dumps(key)},"
+                )
+                self.add_deferred_source_code_line(
+                    f"    text={json.dumps(host_text)},"
+                )
+                self.add_deferred_source_code_line(
+                    f"    register_field_list={register_field_list},"
+                )
+                self.add_deferred_source_code_line(")")
+                continue
+
+            child_vars = self._emit_text_wrapper_construction(wrapper, "_wrapper", "_host")
+            if child_vars is None:
                 self.add_deferred_source_code_line(
                     f'# unsupported hosted FIELD on {entity.dxftype()} key {json.dumps(key)}'
                 )
                 continue
-            self.add_deferred_source_code_line("_wrapper = _host.set_linked_field(")
             self.add_deferred_source_code_line(
-                "    _field,"
+                f"_host.set_field(_wrapper, key={json.dumps(key)})"
             )
+            for child_var in child_vars:
+                self.add_deferred_source_code_line(
+                    f"{child_var}.dxf.owner = _wrapper.dxf.handle"
+                )
             self.add_deferred_source_code_line(
-                f"    key={json.dumps(key)},"
+                "_wrapper.set_reactors([_host.get_field_dict().dxf.handle])"
             )
-            self.add_deferred_source_code_line(
-                f"    text={json.dumps(host_text)},"
-            )
-            self.add_deferred_source_code_line(
-                f"    register_field_list={self._uses_field_list(wrapper, child)},"
-            )
-            self.add_deferred_source_code_line(")")
+            if register_field_list:
+                self.add_deferred_source_code_line("_field_list = _host.doc.objects.setup_field_list()")
+                self.add_deferred_source_code_line("_handles = list(_field_list.handles)")
+                self.add_deferred_source_code_line(
+                    "for _handle in (linked.dxf.handle for linked in _wrapper.get_field_tree()):"
+                )
+                self.add_deferred_source_code_line(
+                    "    if _handle and _handle not in _handles:"
+                )
+                self.add_deferred_source_code_line("        _handles.append(_handle)")
+                self.add_deferred_source_code_line("_field_list.handles = _handles")
 
     def generic_api_call(
         self, dxftype: str, dxfattribs: dict, prefix: str = "e = "
@@ -1957,6 +2036,7 @@ class _SourceCodeGenerator:
 
         if entity.gradient is not None:
             g = entity.gradient
+            self.add_import_statement("from ezdxf.colors import RGB")
             add_line("e.set_gradient(")
             add_line(arg.format("color1", str(g.color1)))
             add_line(arg.format("color2", str(g.color2)))
