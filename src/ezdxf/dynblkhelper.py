@@ -60,9 +60,11 @@ __all__ = [
     "get_dynamic_block_property_assoc_networks",
     "get_dynamic_block_property_representations",
     "get_dynamic_block_property_representation_families",
+    "set_dynamic_block_definition_metadata",
     "setup_dynamic_block_property_attdef_support",
     "set_dynamic_block_linear_parameter",
     "set_dynamic_block_base_point_parameter",
+    "set_dynamic_block_insert_appdata_record",
     "set_dynamic_block_insert_cache_record",
     "set_dynamic_block_insert_cache",
     "set_dynamic_block_lookup_parameter",
@@ -98,12 +100,22 @@ def _ensure_dynamic_block_properties_appids(doc: Drawing) -> None:
             doc.appids.new(name)
 
 
+def _ensure_annotative_appid(doc: Drawing) -> None:
+    if "AcadAnnotative" not in doc.appids:
+        doc.appids.new("AcadAnnotative")
+
+
 def _tag_block_representation_entities(block: BlockLayout) -> None:
     for index, entity in enumerate(block):
-        entity.set_xdata(
-            AcDbBlockRepETag,
-            [(1070, 1), (1071, index), (1005, entity.dxf.handle)],
-        )
+        if entity.dxftype() == "ATTDEF" and entity.has_xdata(AcDbBlockRepETag):
+            continue
+        _set_entity_rep_etag(entity, index)
+
+
+def _set_entity_rep_etag(entity, rep_index: int, rep_handle: Optional[str] = None) -> None:
+    if rep_handle is None:
+        rep_handle = entity.dxf.handle
+    entity.set_xdata(AcDbBlockRepETag, [(1070, 1), (1071, rep_index), (1005, rep_handle)])
 
 
 def _default_annotation_scale_handle(doc: Drawing) -> str:
@@ -128,15 +140,16 @@ def _default_annotation_scale_handle(doc: Drawing) -> str:
 
 
 def _set_property_attdef_rep_etag(attdef, rep_index: int) -> None:
-    attdef.set_xdata(AcDbBlockRepETag, [(1070, 1), (1071, rep_index), (1005, "0")])
+    _set_entity_rep_etag(attdef, rep_index, "0")
 
 
-def _ensure_property_attdef_annotative_metadata(attdef) -> None:
+def _ensure_property_attdef_annotative_metadata(
+    attdef, *, create_context_record: bool = True
+) -> None:
     doc = attdef.doc
     if doc is None:
         raise const.DXFStructureError("valid DXF document required")
-    if "AcadAnnotative" not in doc.appids:
-        doc.appids.new("AcadAnnotative")
+    _ensure_annotative_appid(doc)
 
     attdef.set_xdata(
         "AcadAnnotative",
@@ -144,7 +157,7 @@ def _ensure_property_attdef_annotative_metadata(attdef) -> None:
             (1000, "AnnotativeData"),
             (1002, "{"),
             (1070, 1),
-            (1070, 1),
+            (1070, 1 if create_context_record else 0),
             (1002, "}"),
         ],
     )
@@ -160,27 +173,28 @@ def _ensure_property_attdef_annotative_metadata(attdef) -> None:
     context_manager.set_reactors([root.dxf.handle])
     annot_scales.set_reactors([context_manager.dxf.handle])
 
-    context_data = annot_scales.get("*A1")
-    if not isinstance(context_data, DXFTagStorage):
-        context_data = _new_tag_storage_object(
-            doc,
-            "ACDB_MTEXTATTRIBUTEOBJECTCONTEXTDATA_CLASS",
-            annot_scales.dxf.handle,
-            [
-                [(100, "AcDbObjectContextData"), (70, 4), (290, 1)],
+    if create_context_record:
+        context_data = annot_scales.get("*A1")
+        if not isinstance(context_data, DXFTagStorage):
+            context_data = _new_tag_storage_object(
+                doc,
+                "ACDB_MTEXTATTRIBUTEOBJECTCONTEXTDATA_CLASS",
+                annot_scales.dxf.handle,
                 [
-                    (100, "AcDbAnnotScaleObjectContextData"),
-                    (340, _default_annotation_scale_handle(doc)),
-                    (70, 0),
-                    (50, 0.0),
-                    (10, (attdef.dxf.insert.x, attdef.dxf.insert.y)),
-                    (11, (0.0, 0.0)),
-                    (290, 0),
+                    [(100, "AcDbObjectContextData"), (70, 4), (290, 1)],
+                    [
+                        (100, "AcDbAnnotScaleObjectContextData"),
+                        (340, _default_annotation_scale_handle(doc)),
+                        (70, 0),
+                        (50, 0.0),
+                        (10, (attdef.dxf.insert.x, attdef.dxf.insert.y)),
+                        (11, (0.0, 0.0)),
+                        (290, 0),
+                    ],
                 ],
-            ],
-        )
-        _set_owner_reactor(context_data, annot_scales.dxf.handle)
-        annot_scales.add("*A1", context_data)
+            )
+            _set_owner_reactor(context_data, annot_scales.dxf.handle)
+            annot_scales.add("*A1", context_data)
 
 
 def _ensure_property_attdef_metadata(attdef, rep_index: int) -> None:
@@ -188,15 +202,84 @@ def _ensure_property_attdef_metadata(attdef, rep_index: int) -> None:
     _ensure_property_attdef_annotative_metadata(attdef)
 
 
+def _attdef_has_context_record(attdef) -> bool:
+    return bool(
+        attdef.has_extension_dict
+        and isinstance(attdef.get_extension_dict().dictionary.get("AcDbContextDataManager"), Dictionary)
+        and isinstance(
+            attdef.get_extension_dict().dictionary.get("AcDbContextDataManager").get("ACDB_ANNOTATIONSCALES"),
+            Dictionary,
+        )
+        and "*A1"
+        in attdef.get_extension_dict().dictionary.get("AcDbContextDataManager").get("ACDB_ANNOTATIONSCALES")
+    )
+
+
+def _attdef_rep_index(attdef) -> Optional[int]:
+    try:
+        return int(attdef.get_xdata(AcDbBlockRepETag).get_first_value(1071, -1))
+    except const.DXFValueError:
+        return None
+
+
 def setup_dynamic_block_property_attdef_support(
     attdef,
     rep_index: int,
     *,
     annotative: bool = False,
+    create_context_record: bool = True,
 ) -> None:
     _set_property_attdef_rep_etag(attdef, rep_index)
     if annotative:
-        _ensure_property_attdef_annotative_metadata(attdef)
+        _ensure_property_attdef_annotative_metadata(
+            attdef, create_context_record=create_context_record
+        )
+
+
+def set_dynamic_block_definition_metadata(
+    block: BlockLayout,
+    *,
+    guid: str = "",
+    true_name: str = "",
+    rep_index: Optional[int] = None,
+    annotative: bool = False,
+) -> None:
+    doc = block.doc
+    if doc is None:
+        raise const.DXFStructureError("valid DXF document required")
+    _ensure_dynamic_block_appids(doc)
+    if annotative:
+        _ensure_annotative_appid(doc)
+        block.block_record.set_xdata(
+            "AcadAnnotative",
+            [
+                (1000, "AnnotativeData"),
+                (1002, "{"),
+                (1070, 1),
+                (1070, 0),
+                (1002, "}"),
+            ],
+        )
+    if not guid:
+        guid = "{" + str(uuid.uuid4()).upper() + "}"
+    if not true_name:
+        true_name = block.name
+    if rep_index is None:
+        rep_index = len(block)
+    block.block_record.set_xdata(AcDbDynamicBlockGUID, [(1000, guid)])
+    block.block_record.set_xdata(AcDbDynamicBlockTrueName, [(1000, true_name)])
+    block.block_record.set_xdata(AcDbBlockRepETag, [(1070, 1), (1071, rep_index)])
+    xdict = _ensure_dynamic_block_extension_dict(block.block_record)
+    purge = xdict.get("AcDbDynamicBlockRoundTripPurgePreventer")
+    if not isinstance(purge, DXFTagStorage):
+        purge = _new_tag_storage_object(
+            doc,
+            "ACDB_DYNAMICBLOCKPURGEPREVENTER_VERSION",
+            xdict.dxf.handle,
+            [[(100, "AcDbDynamicBlockPurgePreventer"), (70, 1)]],
+        )
+        _set_owner_reactor(purge, xdict.dxf.handle)
+        xdict.add("AcDbDynamicBlockRoundTripPurgePreventer", purge)
 
 
 def _get_property_attdefs(block: BlockLayout) -> tuple:
@@ -223,6 +306,8 @@ def _clone_property_attdefs_to_reference(reference: BlockLayout, dynamic_block: 
             },
         )
         clone.dxf.prompt = attdef.dxf.prompt
+        if attdef.dxf.get("invisible", 0):
+            clone.dxf.invisible = 1
 
 
 
@@ -278,11 +363,18 @@ def _apply_property_attdef_visibility(
     if not property_tags:
         return
     if get_dynamic_block_linear_parameters(dynamic_block):
+        source_invisible = {
+            attdef.dxf.tag: int(attdef.dxf.get("invisible", 0))
+            for attdef in _get_property_attdefs(dynamic_block)
+        }
         for entity in block:
             if entity.dxftype() != "ATTDEF":
                 continue
             if entity.dxf.tag in property_tags:
-                entity.dxf.discard("invisible")
+                if source_invisible.get(entity.dxf.tag, 0):
+                    entity.dxf.invisible = 1
+                else:
+                    entity.dxf.discard("invisible")
         return
     visible = state == first_state_name
     for entity in block:
@@ -347,6 +439,8 @@ class DynamicBlockLinearParameter:
     end_grip_handle: str = ""
     base_grip_label: str = ""
     end_grip_label: str = ""
+    base_grip_location: Optional[tuple[float, float, float]] = None
+    end_grip_location: Optional[tuple[float, float, float]] = None
     value_set_type: int = 0
     value_count: int = 0
     allowed_values: tuple[float, ...] = ()
@@ -730,6 +824,8 @@ def _parse_linear_parameter(
         end_grip_handle=end_grip.handle if end_grip is not None else "",
         base_grip_label=base_grip.label if base_grip is not None else "",
         end_grip_label=end_grip.label if end_grip is not None else "",
+        base_grip_location=base_grip.location if base_grip is not None else None,
+        end_grip_location=end_grip.location if end_grip is not None else None,
         value_set_type=int(linear_tags.get_first_value(96, 0)),
         value_count=int(linear_tags.get_first_value(175, 0)),
         allowed_values=allowed_values,
@@ -1034,9 +1130,13 @@ def _parse_block_properties_table(entity: DXFTagStorage) -> Optional[DynamicBloc
         for _column in range(column_count):
             if index >= len(table_tags) or table_tags[index].code != 170:
                 break
-            index += 1  # value type marker, currently ignored
+            value_marker = int(table_tags[index].value)
+            index += 1
             if index >= len(table_tags):
                 break
+            if value_marker == -9999 and table_tags[index].code in (170, 90, 92, 93):
+                values.append(None)
+                continue
             value_tag = table_tags[index]
             index += 1
             values.append(_convert_property_cell_value(value_tag))
@@ -1878,6 +1978,9 @@ def _build_block_properties_table_subclass(
     for row in table.rows:
         tags.append((90, row.index))
         for value in row.values:
+            if value is None:
+                tags.append((170, -9999))
+                continue
             tags.append((170, 1))
             tags.append((300, str(value)))
     tags.extend([(93, len(table.rows)), (290, 0), (291, 1), (292, 0)])
@@ -1891,6 +1994,8 @@ def _build_property_visibility_parameter_subclass(
     *,
     extra_state_refs: Sequence[Sequence[str]] = (),
     all_handles: Optional[Sequence[str]] = None,
+    include_table_in_all_states: bool = False,
+    table_before_grip: bool = False,
 ) -> list[tuple[int, Any]]:
     if all_handles is None:
         all_handles = visibility.all_entity_handles or tuple(
@@ -1917,8 +2022,11 @@ def _build_property_visibility_parameter_subclass(
                 *[(332, handle) for handle in state.entity_handles],
             ]
         )
-        refs = [properties_grip_handle]
-        if index == 0 and properties_table_handle:
+        refs: list[str] = []
+        if table_before_grip and properties_table_handle and (include_table_in_all_states or index == 0):
+            refs.append(properties_table_handle)
+        refs.append(properties_grip_handle)
+        if not table_before_grip and properties_table_handle and (include_table_in_all_states or index == 0):
             refs.append(properties_table_handle)
         if index < len(extra_state_refs):
             refs.extend(extra_state_refs[index])
@@ -1946,24 +2054,17 @@ def _augment_visibility_with_property_attdefs(
     property_handles = tuple(attdef.dxf.handle for attdef in attdefs if attdef.dxf.handle)
     if not property_handles:
         return visibility
-    states = tuple(
-        DynamicBlockVisibilityState(
-            state.name,
-            _unique_handles([*state.entity_handles, *property_handles]),
-        )
-        for state in visibility.states
-    )
     all_handles = _unique_handles([*(visibility.all_entity_handles or ()), *property_handles])
     if not all_handles:
         all_handles = _unique_handles(
-            [handle for state in states for handle in state.entity_handles]
+            [handle for state in visibility.states for handle in state.entity_handles]
         )
     return DynamicBlockVisibilityParameter(
         handle=visibility.handle,
         label=visibility.label,
         parameter_name=visibility.parameter_name,
         location=visibility.location,
-        states=states,
+        states=visibility.states,
         all_entity_handles=all_handles,
     )
 
@@ -1984,6 +2085,41 @@ def _patch_eval_graph_handles(graph: DXFTagStorage, handles: Sequence[str]) -> N
         if tag.code == 360 and handle_index < len(handles):
             eval_graph[index] = dxftag(360, handles[handle_index])
             handle_index += 1
+
+
+def _set_graph_node_id(graph: DXFTagStorage, node_id: int) -> None:
+    graph.set_xdata(AcadBPTGraphNodeId, [(1071, node_id)])
+
+
+def _set_visibility_column_value_type(
+    table_entity: DXFTagStorage,
+    visibility_handle: str,
+    value_type: int,
+) -> None:
+    sub = table_entity.xtags.get_subclass("AcDbBlockPropertiesTable")
+    tags = list(sub)
+    column_count = int(next((tag.value for tag in tags if tag.code == 91), 0))
+    if column_count <= 0:
+        return
+    offset = 5
+    chunk_size = 15
+    for _ in range(column_count):
+        if offset + chunk_size > len(tags):
+            break
+        chunk = list(tags[offset : offset + chunk_size])
+        if chunk[0].code == 340 and str(chunk[0].value) == visibility_handle:
+            chunk[5] = type(chunk[5])(90, value_type)
+            tags[offset : offset + chunk_size] = chunk
+            _replace_subclass_tags(sub, [(tag.code, tag.value) for tag in tags])
+            return
+        offset += chunk_size
+
+
+def _register_blkref_handle(block: BlockLayout, insert: Insert) -> None:
+    handles = block.block_record.blkref_handles
+    handle = insert.dxf.handle
+    if handle and handle not in handles:
+        handles.append(handle)
 
 
 def _build_linear_eval_graph_subclass() -> list[tuple[int, Any]]:
@@ -2221,6 +2357,84 @@ def _build_linear_eval_graph_subclass() -> list[tuple[int, Any]]:
         (92, -1),
         (92, -1),
         (92, 9),
+        (92, -1),
+        (92, -1),
+    ]
+
+
+def _build_visibility_basepoint_eval_graph_subclass() -> list[tuple[int, Any]]:
+    return [
+        (100, "AcDbEvalGraph"),
+        (96, 5),
+        (97, 5),
+        (91, 0),
+        (93, 32),
+        (95, 1),
+        (360, "0"),
+        (92, -1),
+        (92, -1),
+        (92, -1),
+        (92, -1),
+        (91, 1),
+        (93, 32),
+        (95, 2),
+        (360, "0"),
+        (92, 0),
+        (92, 0),
+        (92, 1),
+        (92, 2),
+        (91, 2),
+        (93, 32),
+        (95, 3),
+        (360, "0"),
+        (92, -1),
+        (92, -1),
+        (92, 0),
+        (92, 0),
+        (91, 3),
+        (93, 32),
+        (95, 4),
+        (360, "0"),
+        (92, 1),
+        (92, 1),
+        (92, -1),
+        (92, -1),
+        (91, 4),
+        (93, 32),
+        (95, 5),
+        (360, "0"),
+        (92, 2),
+        (92, 2),
+        (92, -1),
+        (92, -1),
+        (92, 0),
+        (93, 0),
+        (94, 1),
+        (91, 2),
+        (91, 1),
+        (92, -1),
+        (92, -1),
+        (92, -1),
+        (92, -1),
+        (92, -1),
+        (92, 1),
+        (93, 0),
+        (94, 1),
+        (91, 1),
+        (91, 3),
+        (92, -1),
+        (92, -1),
+        (92, -1),
+        (92, 2),
+        (92, -1),
+        (92, 2),
+        (93, 0),
+        (94, 1),
+        (91, 1),
+        (91, 4),
+        (92, -1),
+        (92, -1),
+        (92, 1),
         (92, -1),
         (92, -1),
     ]
@@ -2849,12 +3063,39 @@ def set_dynamic_block_properties_table(
     if len(stretch_actions) != len(linear_parameters):
         raise const.DXFValueError("linear parameter and stretch action counts do not match")
 
+    preexisting_attdefs = {
+        entity.dxf.tag: (
+            entity.has_xdata("AcadAnnotative"),
+            int(entity.dxf.get("invisible", 0)),
+            entity.has_extension_dict,
+            _attdef_has_context_record(entity),
+        )
+        for entity in block
+        if entity.dxftype() == "ATTDEF"
+    }
+
     resolved_columns = _resolve_property_table_columns(block, table, visibility)
     _tag_block_representation_entities(block)
     for index, entity in enumerate(block):
         if entity.dxftype() == "ATTDEF":
-            _ensure_property_attdef_metadata(entity, index)
-            entity.dxf.discard("invisible")
+            was_annotative, invisible, preserve_existing, has_context_record = preexisting_attdefs.get(
+                entity.dxf.tag, (True, 0, False, True)
+            )
+            if not preserve_existing:
+                was_annotative = True
+                invisible = 0
+                has_context_record = True
+            _set_property_attdef_rep_etag(entity, index)
+            if was_annotative:
+                _ensure_property_attdef_annotative_metadata(
+                    entity, create_context_record=has_context_record
+                )
+            else:
+                entity.discard_xdata("AcadAnnotative")
+            if invisible:
+                entity.dxf.invisible = invisible
+            else:
+                entity.dxf.discard("invisible")
     _delete_graph_stack(block.block_record)
 
     true_name = block.name
@@ -2976,7 +3217,7 @@ def set_dynamic_block_properties_table(
         ]],
     )
     _set_owner_reactor(graph, xdict.dxf.handle)
-    graph.set_xdata(AcadBPTGraphNodeId, [(1071, 32)])
+    _set_graph_node_id(graph, 32)
     xdict.add("ACAD_ENHANCEDBLOCK", graph)
     purge = _new_tag_storage_object(
         doc,
@@ -3129,6 +3370,94 @@ def set_dynamic_block_base_point_parameter(
             [(100, "AcDbBlockBasepointParameter"), (1011, parameter.base_point), (1012, parameter.second_point)],
         ],
     )
+    owned = tuple(_iter_graph_owned_objects(graph))
+    visibility_entity = next((obj for obj in owned if obj.dxftype() == "BLOCKVISIBILITYPARAMETER"), None)
+    visibility_grip = next((obj for obj in owned if obj.dxftype() == "BLOCKVISIBILITYGRIP"), None)
+    grip_components = [obj for obj in owned if obj.dxftype() == "BLOCKGRIPLOCATIONCOMPONENT"]
+    graph_types = {obj.dxftype() for obj in owned}
+    if (
+        isinstance(visibility_entity, DXFTagStorage)
+        and isinstance(visibility_grip, DXFTagStorage)
+        and len(grip_components) == 2
+        and graph_types.isdisjoint(
+            {
+                "ACDB_DYNAMICBLOCKPROXYNODE",
+                "BLOCKPROPERTIESTABLE",
+                "BLOCKPROPERTIESTABLEGRIP",
+                "BLOCKLINEARPARAMETER",
+                "BLOCKLINEARGRIP",
+                "BLOCKLOOKUPPARAMETER",
+                "BLOCKLOOKUPGRIP",
+                "BLOCKLOOKUPACTION",
+                "BLOCKSTRETCHACTION",
+            }
+        )
+    ):
+        x_comp = next(
+            (
+                obj
+                for obj in grip_components
+                if obj.xtags.get_subclass("AcDbBlockGripExpr").get_first_value(300, "") == "UpdatedX"
+            ),
+            None,
+        )
+        y_comp = next(
+            (
+                obj
+                for obj in grip_components
+                if obj.xtags.get_subclass("AcDbBlockGripExpr").get_first_value(300, "") == "UpdatedY"
+            ),
+            None,
+        )
+        if isinstance(x_comp, DXFTagStorage) and isinstance(y_comp, DXFTagStorage):
+            vis_location = visibility_entity.xtags.get_subclass("AcDbBlock1PtParameter").get_first_value(1010, parameter.location)
+            grip_location = visibility_grip.xtags.get_subclass("AcDbBlockGrip").get_first_value(1010, vis_location)
+            _replace_subclass_tags(
+                visibility_entity.xtags.get_subclass("AcDbEvalExpr"),
+                [(100, "AcDbEvalExpr"), (90, 2), (98, 33), (99, 378)],
+            )
+            _replace_subclass_tags(
+                visibility_entity.xtags.get_subclass("AcDbBlock1PtParameter"),
+                [(100, "AcDbBlock1PtParameter"), (1010, vis_location), (93, 3), (170, 0), (171, 0)],
+            )
+            _replace_subclass_tags(
+                visibility_grip.xtags.get_subclass("AcDbEvalExpr"),
+                [(100, "AcDbEvalExpr"), (90, 3), (98, 33), (99, 378)],
+            )
+            _replace_subclass_tags(
+                visibility_grip.xtags.get_subclass("AcDbBlockGrip"),
+                [(100, "AcDbBlockGrip"), (91, 4), (92, 5), (1010, grip_location), (280, 0), (93, -1)],
+            )
+            _replace_subclass_tags(
+                x_comp.xtags.get_subclass("AcDbEvalExpr"),
+                [(100, "AcDbEvalExpr"), (90, 4), (98, 33), (99, 378), (1, ""), (70, 40), (140, 0.0)],
+            )
+            _replace_subclass_tags(
+                x_comp.xtags.get_subclass("AcDbBlockGripExpr"),
+                [(100, "AcDbBlockGripExpr"), (91, 2), (300, "UpdatedX")],
+            )
+            _replace_subclass_tags(
+                y_comp.xtags.get_subclass("AcDbEvalExpr"),
+                [(100, "AcDbEvalExpr"), (90, 5), (98, 33), (99, 378), (1, ""), (70, 40), (140, 0.0)],
+            )
+            _replace_subclass_tags(
+                y_comp.xtags.get_subclass("AcDbBlockGripExpr"),
+                [(100, "AcDbBlockGripExpr"), (91, 2), (300, "UpdatedY")],
+            )
+            _replace_subclass_tags(
+                graph.xtags.get_subclass("AcDbEvalGraph"),
+                _build_visibility_basepoint_eval_graph_subclass(),
+            )
+            _patch_eval_graph_handles(
+                graph,
+                [
+                    entity.dxf.handle,
+                    visibility_entity.dxf.handle,
+                    visibility_grip.dxf.handle,
+                    x_comp.dxf.handle,
+                    y_comp.dxf.handle,
+                ],
+            )
     return DynamicBlockBasePointParameter(
         handle=entity.dxf.handle or "",
         label=parameter.label,
@@ -3215,6 +3544,8 @@ def set_dynamic_block_linear_parameter(
         float(parameter.end_point[1] - parameter.base_point[1]),
         float(parameter.end_point[2] - parameter.base_point[2]),
     )
+    base_grip_location = parameter.base_grip_location or parameter.base_point
+    end_grip_location = parameter.end_grip_location or parameter.end_point
     base_grip_label = parameter.base_grip_label or "Base Grip"
     end_grip_label = parameter.end_grip_label or "End Grip"
     allowed_values = parameter.allowed_values
@@ -3266,15 +3597,6 @@ def set_dynamic_block_linear_parameter(
             [(100, "AcDbBlockGripExpr"), (91, 6), (300, "UpdatedY")],
         )
 
-        dependency_handles = stretch_action.dependency_handles or tuple(
-            handle
-            for handle in (
-                None,
-                basepoint_entity.dxf.handle,
-                *[entity.dxf.handle for entity in reversed(list(block)) if entity.dxf.handle],
-            )
-            if handle
-        )
         linear_entity = _new_tag_storage_object(
             doc,
             "BLOCKLINEARPARAMETER",
@@ -3324,7 +3646,7 @@ def set_dynamic_block_linear_parameter(
             [
                 [(100, "AcDbEvalExpr"), (90, 17), (98, 33), (99, 378)],
                 [(100, "AcDbBlockElement"), (300, end_grip_label), (98, 33), (99, 378), (1071, 0)],
-                [(100, "AcDbBlockGrip"), (91, 18), (92, 19), (1010, parameter.end_point), (280, 1), (93, -1)],
+                [(100, "AcDbBlockGrip"), (91, 18), (92, 19), (1010, end_grip_location), (280, 1), (93, -1)],
                 [(100, "AcDbBlockLinearGrip"), (140, vector[0]), (141, vector[1]), (142, vector[2])],
             ],
         )
@@ -3346,6 +3668,23 @@ def set_dynamic_block_linear_parameter(
                 [(100, "AcDbBlockGripExpr"), (91, 16), (300, "UpdatedEndY")],
             ],
         )
+        entity_handle_set = {entity.dxf.handle for entity in block if entity.dxf.handle}
+        explicit_entity_dependencies = tuple(
+            handle for handle in stretch_action.dependency_handles if handle in entity_handle_set
+        )
+        dependency_handles = (
+            (end_grip.dxf.handle, basepoint_entity.dxf.handle, *explicit_entity_dependencies)
+            if explicit_entity_dependencies
+            else tuple(
+                handle
+                for handle in (
+                    end_grip.dxf.handle,
+                    basepoint_entity.dxf.handle,
+                    *[entity.dxf.handle for entity in reversed(list(block)) if entity.dxf.handle],
+                )
+                if handle
+            )
+        )
         stretch = _new_tag_storage_object(
             doc,
             "BLOCKSTRETCHACTION",
@@ -3358,7 +3697,6 @@ def set_dynamic_block_linear_parameter(
                     (70, 1),
                     (91, 5),
                     (71, len(dependency_handles)),
-                    (330, end_grip.dxf.handle),
                     *[(330, handle) for handle in dependency_handles],
                     (1010, stretch_action.action_location),
                 ],
@@ -3398,8 +3736,12 @@ def set_dynamic_block_linear_parameter(
                 table_grip.dxf.handle,
                 extra_state_refs=tuple((linear_entity.dxf.handle, end_grip.dxf.handle, stretch.dxf.handle) for _ in linear_visibility.states),
                 all_handles=linear_visibility.all_entity_handles,
+                include_table_in_all_states=True,
+                table_before_grip=True,
             ),
         )
+        _set_graph_node_id(graph, 6)
+        _set_visibility_column_value_type(table_entity, visibility_entity.dxf.handle, 1)
         _replace_subclass_tags(graph.xtags.get_subclass("AcDbEvalGraph"), _build_basepoint_linear_eval_graph_subclass())
         _patch_eval_graph_handles(
             graph,
@@ -3429,6 +3771,7 @@ def set_dynamic_block_linear_parameter(
             expr_id=16,
             end_grip_handle=end_grip.dxf.handle or "",
             end_grip_label=end_grip_label,
+            end_grip_location=end_grip_location,
             value_set_type=value_set_type,
             value_count=value_count,
             allowed_values=allowed_values,
@@ -3487,7 +3830,7 @@ def set_dynamic_block_linear_parameter(
         [
             [(100, "AcDbEvalExpr"), (90, 46), (98, 33), (99, 378)],
             [(100, "AcDbBlockElement"), (300, end_grip_label), (98, 33), (99, 378), (1071, 0)],
-            [(100, "AcDbBlockGrip"), (91, 47), (92, 48), (1010, parameter.end_point), (280, 1), (93, -1)],
+            [(100, "AcDbBlockGrip"), (91, 47), (92, 48), (1010, end_grip_location), (280, 1), (93, -1)],
             [(100, "AcDbBlockLinearGrip"), (140, vector[0]), (141, vector[1]), (142, vector[2])],
         ],
     )
@@ -3516,7 +3859,7 @@ def set_dynamic_block_linear_parameter(
         [
             [(100, "AcDbEvalExpr"), (90, 49), (98, 33), (99, 378)],
             [(100, "AcDbBlockElement"), (300, base_grip_label), (98, 33), (99, 378), (1071, 0)],
-            [(100, "AcDbBlockGrip"), (91, 50), (92, 51), (1010, parameter.base_point), (280, 1), (93, -1)],
+            [(100, "AcDbBlockGrip"), (91, 50), (92, 51), (1010, base_grip_location), (280, 1), (93, -1)],
             [(100, "AcDbBlockLinearGrip"), (140, -vector[0]), (141, -vector[1]), (142, -vector[2])],
         ],
     )
@@ -3626,6 +3969,8 @@ def set_dynamic_block_linear_parameter(
         end_grip_handle=end_grip.dxf.handle or "",
         base_grip_label=base_grip_label,
         end_grip_label=end_grip_label,
+        base_grip_location=base_grip_location,
+        end_grip_location=end_grip_location,
         value_set_type=value_set_type,
         value_count=value_count,
         allowed_values=allowed_values,
@@ -4854,10 +5199,39 @@ def set_dynamic_block_reference(
     if clone_property_attdefs:
         _clone_property_attdefs_to_reference(block, dynamic_block)
     if normalize_entities:
+        source_attdefs = {
+            attdef.dxf.tag: (
+                attdef.has_xdata("AcadAnnotative"),
+                _attdef_has_context_record(attdef),
+                int(attdef.dxf.get("invisible", 0)),
+                _attdef_rep_index(attdef),
+            )
+            for attdef in _get_property_attdefs(dynamic_block)
+        }
         _tag_block_representation_entities(block)
         for index, entity in enumerate(block):
             if entity.dxftype() == "ATTDEF":
-                _ensure_property_attdef_metadata(entity, index)
+                annotative, has_context_record, invisible, rep_index = source_attdefs.get(
+                    entity.dxf.tag,
+                    (
+                        entity.has_xdata("AcadAnnotative"),
+                        _attdef_has_context_record(entity),
+                        int(entity.dxf.get("invisible", 0)),
+                        _attdef_rep_index(entity),
+                    ),
+                )
+                _set_property_attdef_rep_etag(entity, rep_index if rep_index is not None else index)
+                if annotative:
+                    _ensure_property_attdef_annotative_metadata(
+                        entity,
+                        create_context_record=has_context_record,
+                    )
+                else:
+                    entity.discard_xdata("AcadAnnotative")
+                if invisible:
+                    entity.dxf.invisible = invisible
+                else:
+                    entity.dxf.discard("invisible")
         properties = get_dynamic_block_properties_table(dynamic_block)
         if properties is not None:
             _set_property_attdef_reactors(block, properties.handle)
@@ -4891,7 +5265,7 @@ def set_dynamic_block_visibility_state(
     if reference is not None:
         if not reference.block_record.has_extension_dict:
             reference.block_record.new_extension_dict()
-        reference.block_record.blkref_handles = [insert.dxf.handle]
+        _register_blkref_handle(reference, insert)
         _apply_visibility_state_to_block(
             reference,
             parameter,
@@ -4963,7 +5337,7 @@ def set_dynamic_block_insert_cache(
     if reference is not None:
         if not reference.block_record.has_extension_dict:
             reference.block_record.new_extension_dict()
-        reference.block_record.blkref_handles = [insert.dxf.handle]
+        _register_blkref_handle(reference, insert)
     if not update_cache:
         return
 
@@ -4990,6 +5364,21 @@ def _ensure_dynamic_insert_cache_dictionary(
     if insert.doc is None:
         raise const.DXFStructureError("valid DXF document required")
 
+    app_cache = _ensure_dynamic_insert_app_cache_dictionary(insert, dynamic_block)
+    enhanced = app_cache.get("ACAD_ENHANCEDBLOCKDATA")
+    if not isinstance(enhanced, Dictionary):
+        enhanced = app_cache.add_new_dict("ACAD_ENHANCEDBLOCKDATA", hard_owned=True)
+    enhanced.set_reactors([app_cache.dxf.handle])
+    return enhanced
+
+
+def _ensure_dynamic_insert_app_cache_dictionary(
+    insert: Insert,
+    dynamic_block: BlockLayout,
+) -> Dictionary:
+    if insert.doc is None:
+        raise const.DXFStructureError("valid DXF document required")
+
     xdict = insert.get_extension_dict() if insert.has_extension_dict else insert.new_extension_dict()
     root = xdict.dictionary
     rep = root.get("AcDbBlockRepresentation")
@@ -5007,11 +5396,7 @@ def _ensure_dynamic_insert_cache_dictionary(
     app_cache = rep.get("AppDataCache")
     if not isinstance(app_cache, Dictionary):
         app_cache = rep.add_new_dict("AppDataCache", hard_owned=True)
-    enhanced = app_cache.get("ACAD_ENHANCEDBLOCKDATA")
-    if not isinstance(enhanced, Dictionary):
-        enhanced = app_cache.add_new_dict("ACAD_ENHANCEDBLOCKDATA", hard_owned=True)
-    enhanced.set_reactors([app_cache.dxf.handle])
-    return enhanced
+    return app_cache
 
 
 def set_dynamic_block_insert_cache_record(
@@ -5029,4 +5414,22 @@ def set_dynamic_block_insert_cache_record(
     if not isinstance(xrecord, XRecord):
         xrecord = enhanced.add_xrecord(key)
     xrecord.set_reactors([enhanced.dxf.handle])
+    xrecord.reset(tags)
+
+
+def set_dynamic_block_insert_appdata_record(
+    insert: Insert,
+    key: str,
+    tags: Sequence[tuple[int, Any]],
+    dynamic_block: Optional[BlockLayout] = None,
+) -> None:
+    if dynamic_block is None:
+        dynamic_block = get_dynamic_block_definition(insert)
+    if dynamic_block is None:
+        raise const.DXFStructureError("dynamic block definition not found")
+    app_cache = _ensure_dynamic_insert_app_cache_dictionary(insert, dynamic_block)
+    xrecord = app_cache.get(key)
+    if not isinstance(xrecord, XRecord):
+        xrecord = app_cache.add_xrecord(key)
+    xrecord.set_reactors([app_cache.dxf.handle])
     xrecord.reset(tags)

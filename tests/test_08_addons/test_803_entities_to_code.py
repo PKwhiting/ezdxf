@@ -1154,9 +1154,77 @@ def test_dynamic_visibility_blocks_to_code():
     )
     assert get_dynamic_block_visibility_state(new_inserts[0]) == "STATE_A"
     assert get_dynamic_block_visibility_state(new_inserts[1]) == "STATE_C"
-    assert get_dynamic_block_reference(new_inserts[0]) is not None
-    assert get_dynamic_block_reference(new_inserts[1]) is not None
+    ref_a = get_dynamic_block_reference(new_inserts[0])
+    ref_c = get_dynamic_block_reference(new_inserts[1])
+    assert ref_a is not None
+    assert ref_c is not None
+    assert all(entity.has_xdata("AcDbBlockRepETag") for entity in ref_a)
+    assert all(entity.has_xdata("AcDbBlockRepETag") for entity in ref_c)
     assert new_doc.blocks.get("DYN_VIS_DXF2CODE") is not None
+
+
+def test_dynamic_visibility_blocks_to_code_preserves_sparse_rep_indices():
+    source_doc = ezdxf.new("R2018")
+    source_msp = source_doc.modelspace()
+    base = source_doc.blocks.new("DYN_VIS_SPARSE_REP")
+    common1 = base.add_line((0, 0), (1, 0))
+    common2 = base.add_line((0, 1), (1, 1))
+    state_b = base.add_circle((1, 1), radius=0.5)
+    base_entities = list(base)
+    parameter = DynamicBlockVisibilityParameter(
+        handle="",
+        label="Visibility State",
+        parameter_name="Visibility1Param",
+        location=(0.0, 14.0, 0.0),
+        states=(
+            DynamicBlockVisibilityState(
+                "STATE_A",
+                (common1.dxf.handle, common2.dxf.handle),
+            ),
+            DynamicBlockVisibilityState("STATE_B", (state_b.dxf.handle,)),
+        ),
+    )
+    set_dynamic_block_visibility_parameter(base, parameter, guid="{GUID}")
+    sparse_indices = (0, 1, 3)
+    for entity, index in zip(base_entities, sparse_indices):
+        entity.set_xdata(
+            "AcDbBlockRepETag",
+            [(1070, 1), (1071, index), (1005, entity.dxf.handle)],
+        )
+    base.block_record.set_xdata("AcDbBlockRepETag", [(1070, 1), (1071, 4)])
+
+    anon = source_doc.blocks.new_anonymous_block(type_char="U")
+    anon.add_line((0, 0), (1, 0))
+    anon.add_line((0, 1), (1, 1))
+    anon.add_circle((1, 1), radius=0.5)
+    set_dynamic_block_reference(anon, base)
+    anon_entities = list(anon)
+    for entity, index in zip(anon_entities, sparse_indices):
+        entity.set_xdata(
+            "AcDbBlockRepETag",
+            [(1070, 1), (1071, index), (1005, entity.dxf.handle)],
+        )
+    insert = source_msp.add_blockref(anon.name, (0, 0))
+    set_dynamic_block_visibility_state(insert, base, state="STATE_A")
+
+    target_doc = ezdxf.new("R2018")
+    namespace = {"ezdxf": ezdxf, "doc": target_doc, "msp": target_doc.modelspace()}
+    execute_code_in_namespace(block_to_code(base, drawing="doc"), namespace)
+    execute_code_in_namespace(block_to_code(anon, drawing="doc"), namespace)
+    execute_code_in_namespace(entities_to_code([insert], layout="msp"), namespace)
+
+    new_doc = namespace["doc"]
+    new_base = new_doc.blocks.get("DYN_VIS_SPARSE_REP")
+    new_insert = list(namespace["msp"].query("INSERT"))[0]
+    new_ref = get_dynamic_block_reference(new_insert)
+
+    assert new_base is not None
+    assert new_ref is not None
+    assert list(new_base.block_record.get_xdata("AcDbBlockRepETag")) == [(1070, 1), (1071, 4)]
+    assert [list(entity.get_xdata("AcDbBlockRepETag"))[1][1] for entity in new_base] == [0, 1, 3]
+    assert [list(entity.get_xdata("AcDbBlockRepETag"))[1][1] for entity in new_ref] == [0, 1, 3]
+    assert [list(entity.get_xdata("AcDbBlockRepETag"))[2][1] for entity in new_base] == [entity.dxf.handle for entity in new_base]
+    assert [list(entity.get_xdata("AcDbBlockRepETag"))[2][1] for entity in new_ref] == [entity.dxf.handle for entity in new_ref]
 
 
 def test_dynamic_block_properties_to_code():
@@ -1333,6 +1401,7 @@ def test_dynamic_block_linear_parameter_to_code():
         expr_id=0,
         base_grip_label="Base Grip",
         end_grip_label="End Grip",
+        end_grip_location=(0.25, 2.0, 0.0),
     )
     stretch = DynamicBlockStretchAction(
         handle="",
@@ -1398,11 +1467,18 @@ def test_dynamic_block_linear_parameter_to_code():
     assert new_linear[0].base_grip_label == "Base Grip"
     assert new_linear[0].end_grip_label == "End Grip"
     assert new_linear[0].end_point == (1.0, 0.0, 0.0)
+    assert new_linear[0].end_grip_location == (0.25, 2.0, 0.0)
     assert len(new_actions) == 1
     assert new_actions[0].label == "Stretch1"
     assert new_actions[0].selection_window == ((2.0, 1.0, 0.0), (0.5, -0.5, 0.0))
     assert get_dynamic_block_visibility_state(new_inserts[0]) == "STATE_A"
     assert get_dynamic_block_visibility_state(new_inserts[1]) == "STATE_C"
+    ref_a = get_dynamic_block_reference(new_inserts[0])
+    ref_c = get_dynamic_block_reference(new_inserts[1])
+    assert ref_a is not None
+    assert ref_c is not None
+    assert all(entity.has_xdata("AcDbBlockRepETag") for entity in ref_a)
+    assert all(entity.has_xdata("AcDbBlockRepETag") for entity in ref_c)
 
 
 def test_dynamic_block_lookup_parameter_to_code():

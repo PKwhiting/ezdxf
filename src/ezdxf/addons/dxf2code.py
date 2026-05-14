@@ -506,6 +506,29 @@ class _SourceCodeGenerator:
             return None
 
     @staticmethod
+    def _entity_rep_etag_info(entity) -> Optional[tuple[int, str]]:
+        try:
+            tags = list(entity.get_xdata("AcDbBlockRepETag"))
+        except const.DXFValueError:
+            return None
+        rep_index = next((int(tag.value) for tag in tags if tag.code == 1071), -1)
+        rep_handle = next((str(tag.value) for tag in tags if tag.code == 1005), "")
+        if rep_index < 0:
+            return None
+        return rep_index, rep_handle
+
+    @staticmethod
+    def _attdef_has_context_record(entity) -> bool:
+        if not entity.has_extension_dict:
+            return False
+        root = entity.get_extension_dict().dictionary
+        mgr = root.get("AcDbContextDataManager")
+        if not isinstance(mgr, Dictionary):
+            return False
+        scales = mgr.get("ACDB_ANNOTATIONSCALES")
+        return isinstance(scales, Dictionary) and "*A1" in scales
+
+    @staticmethod
     def _field_has_eval_option(field) -> bool:
         return any(
             tag.code == 6 and tag.value == "ACAD_ROUNDTRIP_2008_FIELD_EVALOPTION"
@@ -700,6 +723,36 @@ class _SourceCodeGenerator:
             except const.DXFValueError:
                 return block_record.dxf.name
 
+    @staticmethod
+    def _block_rep_index(block_record) -> Optional[int]:
+        try:
+            return int(block_record.get_xdata("AcDbBlockRepETag").get_first_value(1071, -1))
+        except const.DXFValueError:
+            return None
+
+    def _emit_block_rep_etag_preservation(self, block) -> None:
+        rep_index = self._block_rep_index(block.block_record)
+        if rep_index is not None:
+            self.add_source_code_line(
+                f'b.block_record.set_xdata("AcDbBlockRepETag", [(1070, 1), (1071, {rep_index})])'
+            )
+        for entity in block:
+            handle = entity.dxf.get("handle")
+            if not handle:
+                continue
+            info = self._entity_rep_etag_info(entity)
+            if info is None:
+                continue
+            rep_index, rep_handle = info
+            rep_handle_expr = (
+                f'_entity_map[{json.dumps(handle)}].dxf.handle'
+                if rep_handle == handle
+                else json.dumps(rep_handle)
+            )
+            self.add_source_code_line(
+                f'_entity_map[{json.dumps(handle)}].set_xdata("AcDbBlockRepETag", [(1070, 1), (1071, {rep_index}), (1005, {rep_handle_expr})])'
+            )
+
     def _emit_dynamic_block_metadata(self, block) -> None:
         from ezdxf.dynblkhelper import (
             get_dynamic_block_base_point_parameter,
@@ -833,7 +886,7 @@ class _SourceCodeGenerator:
                 )
             if properties_table is not None and linear_parameters:
                 self.add_import_statement(
-                    "from ezdxf.dynblkhelper import DynamicBlockLinearParameter, DynamicBlockStretchAction, set_dynamic_block_linear_parameter"
+                    "from ezdxf.dynblkhelper import DynamicBlockLinearParameter, DynamicBlockStretchAction, DynamicBlockStretchActionTarget, set_dynamic_block_linear_parameter"
                 )
                 if len(linear_parameters) != len(stretch_actions):
                     self.add_source_code_line(
@@ -878,6 +931,12 @@ class _SourceCodeGenerator:
                     self.add_source_code_line(
                         f"    end_grip_label={json.dumps(linear.end_grip_label)},"
                     )
+                    self.add_source_code_line(
+                        f"    base_grip_location={self._format_python_value(linear.base_grip_location)},"
+                    )
+                    self.add_source_code_line(
+                        f"    end_grip_location={self._format_python_value(linear.end_grip_location)},"
+                    )
                     self.add_source_code_line(")")
                     self.add_source_code_line(f"{action_var} = DynamicBlockStretchAction(")
                     self.add_source_code_line("    handle='',")
@@ -902,9 +961,49 @@ class _SourceCodeGenerator:
                     self.add_source_code_line(
                         f"    selection_window={self._format_python_value(action.selection_window)},"
                     )
-                    self.add_source_code_line("    dependency_handles=(),")
-                    self.add_source_code_line("    targets=(),")
+                    if base_point_parameter is not None:
+                        translated_deps = [
+                            f'_entity_map[{json.dumps(handle)}].dxf.handle'
+                            for handle in action.dependency_handles
+                            if handle in self._translated_handles
+                        ]
+                        deps = ", ".join(translated_deps)
+                        if len(translated_deps) == 1:
+                            deps += ","
+                        self.add_source_code_line(
+                            f"    dependency_handles=({deps}),"
+                        )
+                        target_vars = []
+                        for t_index, target in enumerate(action.targets):
+                            if target.entity_handle not in self._translated_handles:
+                                continue
+                            target_var = f"{action_var}_target_{t_index}"
+                            target_vars.append(target_var)
+                            self.add_source_code_line(
+                                f"    # {target_var} created below"
+                            )
+                        self.add_source_code_line("    targets=(),")
+                    else:
+                        self.add_source_code_line("    dependency_handles=(),")
+                        self.add_source_code_line("    targets=(),")
                     self.add_source_code_line(")")
+                    if base_point_parameter is not None:
+                        target_vars = []
+                        for t_index, target in enumerate(action.targets):
+                            if target.entity_handle not in self._translated_handles:
+                                continue
+                            target_var = f"{action_var}_target_{t_index}"
+                            target_vars.append(target_var)
+                            self.add_source_code_line(
+                                f"{target_var} = DynamicBlockStretchActionTarget(_entity_map[{json.dumps(target.entity_handle)}].dxf.handle, {self._format_python_value(target.mode)}, {self._format_python_value(target.components)})"
+                            )
+                        joined_targets = ", ".join(target_vars)
+                        if len(target_vars) == 1:
+                            joined_targets += ","
+                        deps_expr = f"({deps})" if translated_deps else "()"
+                        self.add_source_code_line(
+                            f"{action_var} = DynamicBlockStretchAction(handle='', label={json.dumps(action.label)}, action_location={self._format_python_value(action.action_location)}, x_expr_id={self._format_python_value(action.x_expr_id)}, x_name={json.dumps(action.x_name)}, y_expr_id={self._format_python_value(action.y_expr_id)}, y_name={json.dumps(action.y_name)}, selection_window={self._format_python_value(action.selection_window)}, dependency_handles={deps_expr}, targets=({joined_targets}))"
+                        )
                     self.add_source_code_line(
                         f"set_dynamic_block_linear_parameter(b, {linear_var}, {action_var})"
                     )
@@ -1011,6 +1110,23 @@ class _SourceCodeGenerator:
                 self.add_source_code_line(
                     f"set_dynamic_block_lookup_parameter(b, _dyn_lookup, ({joined_action_vars}))"
                 )
+            if (
+                parameter is None
+                and properties_table is None
+                and base_point_parameter is None
+                and not linear_parameters
+                and not lookup_parameters
+            ):
+                self.add_import_statement(
+                    "from ezdxf.dynblkhelper import set_dynamic_block_definition_metadata"
+                )
+                rep_index = self._block_rep_index(block_record)
+                if rep_index is None:
+                    rep_index = len(block)
+                self.add_source_code_line(
+                    f"set_dynamic_block_definition_metadata(b, guid={json.dumps(self._dynamic_block_guid(block_record))}, true_name={json.dumps(self._dynamic_block_true_name(block_record))}, rep_index={rep_index}, annotative={block_record.has_xdata('AcadAnnotative')})"
+                )
+            self._emit_block_rep_etag_preservation(block)
             return
 
         base_handle = get_dynamic_block_record_handle(block_record)
@@ -1023,7 +1139,7 @@ class _SourceCodeGenerator:
             "from ezdxf.dynblkhelper import set_dynamic_block_reference"
         )
         self.add_source_code_line(
-            f"set_dynamic_block_reference(b, {self.doc}.blocks.get({json.dumps(base_block.name)}), clone_property_attdefs=False, normalize_entities=False)"
+            f"set_dynamic_block_reference(b, {self.doc}.blocks.get({json.dumps(base_block.name)}), clone_property_attdefs=False, normalize_entities=True)"
         )
         if any(child.dxftype() == "ATTDEF" and child.get_reactors() for child in block):
             self.add_import_statement(
@@ -1040,6 +1156,7 @@ class _SourceCodeGenerator:
             self.add_source_code_line(
                 "        _attdef.set_reactors([_props.handle])"
             )
+        self._emit_block_rep_etag_preservation(block)
 
     def _schedule_dynamic_block_insert_state(self, entity: Insert) -> None:
         from ezdxf.dynblkhelper import (
@@ -1056,6 +1173,7 @@ class _SourceCodeGenerator:
         if not handle:
             return
         cache_records = self._dynamic_insert_cache_records(entity)
+        appdata_records = self._dynamic_insert_appdata_records(entity)
         if parameter is None:
             if entity.has_extension_dict:
                 self.add_import_statement(
@@ -1065,6 +1183,7 @@ class _SourceCodeGenerator:
                     f"set_dynamic_block_insert_cache(_entity_map[{json.dumps(handle)}], {self.doc}.blocks.get({json.dumps(base_block.name)}), location={self._format_python_value(tuple(entity.dxf.insert))}, update_cache={not bool(cache_records)})"
                 )
                 self._emit_dynamic_insert_cache_records(cache_records, handle, base_block.name)
+                self._emit_dynamic_insert_appdata_records(appdata_records, handle, base_block.name)
             return
         state = get_dynamic_block_visibility_state(entity)
         if not state:
@@ -1076,6 +1195,7 @@ class _SourceCodeGenerator:
             f"set_dynamic_block_visibility_state(_entity_map[{json.dumps(handle)}], {self.doc}.blocks.get({json.dumps(base_block.name)}), state={json.dumps(state)}, location={self._format_python_value(parameter.location)}, update_cache={not bool(cache_records)})"
         )
         self._emit_dynamic_insert_cache_records(cache_records, handle, base_block.name)
+        self._emit_dynamic_insert_appdata_records(appdata_records, handle, base_block.name)
 
     @staticmethod
     def _dynamic_insert_cache_records(
@@ -1098,6 +1218,24 @@ class _SourceCodeGenerator:
                 records.append((str(key), tuple((tag.code, tag.value) for tag in value.tags)))
         return records
 
+    @staticmethod
+    def _dynamic_insert_appdata_records(
+        entity: Insert,
+    ) -> list[tuple[str, tuple[tuple[int, Any], ...]]]:
+        if not entity.has_extension_dict:
+            return []
+        rep = entity.get_extension_dict().dictionary.get("AcDbBlockRepresentation")
+        if not isinstance(rep, Dictionary):
+            return []
+        cache = rep.get("AppDataCache")
+        if not isinstance(cache, Dictionary):
+            return []
+        records: list[tuple[str, tuple[tuple[int, Any], ...]]] = []
+        for key, value in cache.items():
+            if isinstance(value, XRecord):
+                records.append((str(key), tuple((tag.code, tag.value) for tag in value.tags)))
+        return records
+
     def _emit_dynamic_insert_cache_records(
         self,
         records: list[tuple[str, tuple[tuple[int, Any], ...]]],
@@ -1115,6 +1253,25 @@ class _SourceCodeGenerator:
         for key, tags in records:
             self.add_deferred_source_code_line(
                 f"set_dynamic_block_insert_cache_record(_entity_map[{json.dumps(handle)}], {json.dumps(key)}, {self._format_python_value(tags)}, _base)"
+            )
+
+    def _emit_dynamic_insert_appdata_records(
+        self,
+        records: list[tuple[str, tuple[tuple[int, Any], ...]]],
+        handle: str,
+        base_block_name: str,
+    ) -> None:
+        if not records:
+            return
+        self.add_import_statement(
+            "from ezdxf.dynblkhelper import set_dynamic_block_insert_appdata_record"
+        )
+        self.add_deferred_source_code_line(
+            f"_base = {self.doc}.blocks.get({json.dumps(base_block_name)})"
+        )
+        for key, tags in records:
+            self.add_deferred_source_code_line(
+                f"set_dynamic_block_insert_appdata_record(_entity_map[{json.dumps(handle)}], {json.dumps(key)}, {self._format_python_value(tags)}, _base)"
             )
 
     def _format_python_value(self, value: Any) -> str:
@@ -1386,28 +1543,6 @@ class _SourceCodeGenerator:
                 f'_host = _entity_map[{json.dumps(handle)}]'
             )
             register_field_list = self._uses_field_list(wrapper, child)
-            if len(child_fields) == 1:
-                if not self._emit_field_construction(child, "_field", "_host"):
-                    self.add_deferred_source_code_line(
-                        f'# unsupported hosted FIELD on {entity.dxftype()} key {json.dumps(key)}'
-                    )
-                    continue
-                self.add_deferred_source_code_line("_wrapper = _host.set_linked_field(")
-                self.add_deferred_source_code_line(
-                    "    _field,"
-                )
-                self.add_deferred_source_code_line(
-                    f"    key={json.dumps(key)},"
-                )
-                self.add_deferred_source_code_line(
-                    f"    text={json.dumps(host_text)},"
-                )
-                self.add_deferred_source_code_line(
-                    f"    register_field_list={register_field_list},"
-                )
-                self.add_deferred_source_code_line(")")
-                continue
-
             child_vars = self._emit_text_wrapper_construction(wrapper, "_wrapper", "_host")
             if child_vars is None:
                 self.add_deferred_source_code_line(
@@ -1573,6 +1708,10 @@ class _SourceCodeGenerator:
                 "add_attrib(", ["tag", "text", "insert"], entity.dxfattribs()
             )
         )
+        if entity.has_extension_dict:
+            self.add_source_code_line(
+                "if not a.has_extension_dict: a.new_extension_dict()"
+            )
 
     def _attdef(self, entity: DXFEntity) -> None:
         self.add_source_code_lines(
@@ -1584,7 +1723,7 @@ class _SourceCodeGenerator:
                 "from ezdxf.dynblkhelper import setup_dynamic_block_property_attdef_support"
             )
             self.add_source_code_line(
-                f"setup_dynamic_block_property_attdef_support(e, {rep_index}, annotative={entity.has_xdata('AcadAnnotative')})"
+                f"setup_dynamic_block_property_attdef_support(e, {rep_index}, annotative={entity.has_xdata('AcadAnnotative')}, create_context_record={self._attdef_has_context_record(entity)})"
             )
 
     def _mleaderstyle(self, entity: DXFEntity) -> None:
@@ -1650,6 +1789,10 @@ class _SourceCodeGenerator:
                         dxfattribs,
                     )
                 )
+                if attrib.has_extension_dict:
+                    self.add_source_code_line(
+                        "if not a.has_extension_dict: a.new_extension_dict()"
+                    )
                 self._register_entity_handle(attrib, var_name="a")
                 self._schedule_hosted_fields(attrib)
 
@@ -1660,6 +1803,10 @@ class _SourceCodeGenerator:
         # MTEXT content 'text' is not a single DXF tag and therefore not a DXF
         # attribute
         self.add_source_code_line("e.text = {}".format(json.dumps(entity.text)))
+        if entity.has_extension_dict:
+            self.add_source_code_line(
+                "if not e.has_extension_dict: e.new_extension_dict()"
+            )
         if entity.has_extension_dict and "AcDbContextDataManager" in entity.get_extension_dict().dictionary:
             self.add_source_code_line(
                 "_xdict = e.get_extension_dict() if e.has_extension_dict else e.new_extension_dict()"
@@ -1873,6 +2020,10 @@ class _SourceCodeGenerator:
             self.code.blocks.add(resources["context_block_name"])
         self._setup_multileader_style(entity, resources["style_name"])
         self.add_source_code_lines(self.generic_api_call("MULTILEADER", dxfattribs))
+        if entity.has_extension_dict:
+            self.add_source_code_line(
+                "if not e.has_extension_dict: e.new_extension_dict()"
+            )
         self.add_source_code_line("ctx = e.context")
         for name in (
             "scale",
