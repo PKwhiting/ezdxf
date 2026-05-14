@@ -463,14 +463,6 @@ class _SourceCodeGenerator:
         self._register_entity_handle(block.block_record, var_name="b.block_record")
 
     @staticmethod
-    def _get_host_field_text(entity: DXFEntity) -> str:
-        if entity.dxftype() == "MTEXT":
-            return entity.text
-        if entity.dxftype() == "MULTILEADER" and entity.context.mtext is not None:
-            return entity.context.mtext.default_content
-        return entity.dxf.get("text", "")
-
-    @staticmethod
     def _read_field_value(field, marker_code: int, marker_value: str) -> Any:
         tags = list(field.tags)
         for index, tag in enumerate(tags):
@@ -1525,7 +1517,6 @@ class _SourceCodeGenerator:
                 f'# unsupported hosted FIELD on {entity.dxftype()}: missing handle'
             )
             return
-        host_text = self._get_host_field_text(entity)
         for key, wrapper in get_field_dict().items():
             if getattr(wrapper, "dxftype", lambda: "")() != "FIELD":
                 self.add_deferred_source_code_line(

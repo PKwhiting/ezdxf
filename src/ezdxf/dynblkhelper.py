@@ -222,6 +222,25 @@ def _attdef_rep_index(attdef) -> Optional[int]:
         return None
 
 
+@dataclass(frozen=True)
+class _PropertyAttdefState:
+    annotative: bool
+    invisible: int
+    has_extension_dict: bool
+    has_context_record: bool
+    rep_index: Optional[int]
+
+
+def _property_attdef_state(attdef) -> _PropertyAttdefState:
+    return _PropertyAttdefState(
+        annotative=attdef.has_xdata("AcadAnnotative"),
+        invisible=int(attdef.dxf.get("invisible", 0)),
+        has_extension_dict=attdef.has_extension_dict,
+        has_context_record=_attdef_has_context_record(attdef),
+        rep_index=_attdef_rep_index(attdef),
+    )
+
+
 def setup_dynamic_block_property_attdef_support(
     attdef,
     rep_index: int,
@@ -3064,12 +3083,7 @@ def set_dynamic_block_properties_table(
         raise const.DXFValueError("linear parameter and stretch action counts do not match")
 
     preexisting_attdefs = {
-        entity.dxf.tag: (
-            entity.has_xdata("AcadAnnotative"),
-            int(entity.dxf.get("invisible", 0)),
-            entity.has_extension_dict,
-            _attdef_has_context_record(entity),
-        )
+        entity.dxf.tag: _property_attdef_state(entity)
         for entity in block
         if entity.dxftype() == "ATTDEF"
     }
@@ -3078,10 +3092,14 @@ def set_dynamic_block_properties_table(
     _tag_block_representation_entities(block)
     for index, entity in enumerate(block):
         if entity.dxftype() == "ATTDEF":
-            was_annotative, invisible, preserve_existing, has_context_record = preexisting_attdefs.get(
-                entity.dxf.tag, (True, 0, False, True)
+            metadata = preexisting_attdefs.get(
+                entity.dxf.tag,
+                _PropertyAttdefState(True, 0, False, True, None),
             )
-            if not preserve_existing:
+            was_annotative = metadata.annotative
+            invisible = metadata.invisible
+            has_context_record = metadata.has_context_record
+            if not metadata.has_extension_dict:
                 was_annotative = True
                 invisible = 0
                 has_context_record = True
@@ -5200,36 +5218,29 @@ def set_dynamic_block_reference(
         _clone_property_attdefs_to_reference(block, dynamic_block)
     if normalize_entities:
         source_attdefs = {
-            attdef.dxf.tag: (
-                attdef.has_xdata("AcadAnnotative"),
-                _attdef_has_context_record(attdef),
-                int(attdef.dxf.get("invisible", 0)),
-                _attdef_rep_index(attdef),
-            )
+            attdef.dxf.tag: _property_attdef_state(attdef)
             for attdef in _get_property_attdefs(dynamic_block)
         }
         _tag_block_representation_entities(block)
         for index, entity in enumerate(block):
             if entity.dxftype() == "ATTDEF":
-                annotative, has_context_record, invisible, rep_index = source_attdefs.get(
+                metadata = source_attdefs.get(
                     entity.dxf.tag,
-                    (
-                        entity.has_xdata("AcadAnnotative"),
-                        _attdef_has_context_record(entity),
-                        int(entity.dxf.get("invisible", 0)),
-                        _attdef_rep_index(entity),
-                    ),
+                    _property_attdef_state(entity),
                 )
-                _set_property_attdef_rep_etag(entity, rep_index if rep_index is not None else index)
-                if annotative:
+                _set_property_attdef_rep_etag(
+                    entity,
+                    metadata.rep_index if metadata.rep_index is not None else index,
+                )
+                if metadata.annotative:
                     _ensure_property_attdef_annotative_metadata(
                         entity,
-                        create_context_record=has_context_record,
+                        create_context_record=metadata.has_context_record,
                     )
                 else:
                     entity.discard_xdata("AcadAnnotative")
-                if invisible:
-                    entity.dxf.invisible = invisible
+                if metadata.invisible:
+                    entity.dxf.invisible = metadata.invisible
                 else:
                     entity.dxf.discard("invisible")
         properties = get_dynamic_block_properties_table(dynamic_block)
